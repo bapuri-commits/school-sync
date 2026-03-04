@@ -1,0 +1,7 @@
+output/
+.env
+__pycache__/
+*.pyc
+.session.json
+.venv/
+*.egg-info/
