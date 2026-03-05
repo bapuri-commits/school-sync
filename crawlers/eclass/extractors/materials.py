@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from config import REQUEST_DELAY, MIN_DOWNLOAD_SIZE_BYTES, OUTPUT_DIR
+from cache import is_new_or_updated, mark_collected
 
 DOWNLOADS_DIR = OUTPUT_DIR / "downloads"
 
@@ -54,6 +55,10 @@ async def download_materials(
             continue
         seen_urls.add(url)
 
+        if not is_new_or_updated(url):
+            print(f"    [캐시] {name}: 이미 다운로드됨, 스킵")
+            continue
+
         try:
             if source_type == "board":
                 files = await _download_board_attachments(page, url, name, course_dir)
@@ -73,9 +78,14 @@ async def download_materials(
 
         await asyncio.sleep(REQUEST_DELAY)
 
+    for r in results:
+        if "path" in r and "url" in r:
+            mark_collected(r["url"])
+
     success = len([r for r in results if "path" in r])
+    skipped = len(seen_urls) - total if total > 0 else 0
     total = len(results)
-    print(f"  [MATERIALS] course={course_id}: {success}/{total}개 파일 다운로드 완료")
+    print(f"  [MATERIALS] course={course_id}: {success}/{total}개 다운로드")
     return results
 
 
