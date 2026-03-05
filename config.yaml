@@ -1,0 +1,21 @@
+semester: "2026-1"
+request_delay: 0.5
+request_timeout: 30.0
+
+sites:
+  eclass:
+    base_url: "https://eclass.dongguk.edu"
+    enabled: true
+    global_board_ids: [31, 32, 33]
+    min_download_size_bytes: 512
+  portal:
+    base_url: "https://www.dongguk.edu"
+    enabled: true
+  department:
+    base_url: "https://ai.dongguk.edu"
+    enabled: true
+  ndrims:
+    base_url: "https://ndrims.dongguk.edu"
+    enabled: true
+
+output_dir: "output"
