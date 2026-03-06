@@ -82,9 +82,8 @@ async def download_materials(
         if "path" in r and "url" in r:
             mark_collected(r["url"])
 
-    success = len([r for r in results if "path" in r])
-    skipped = len(seen_urls) - total if total > 0 else 0
     total = len(results)
+    success = len([r for r in results if "path" in r])
     print(f"  [MATERIALS] course={course_id}: {success}/{total}개 다운로드")
     return results
 

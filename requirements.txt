@@ -1,3 +1,4 @@
+anthropic
 httpx
 playwright
 pydantic

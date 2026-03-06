@@ -29,6 +29,8 @@ class BrowserSession:
         self._browser = await self._playwright.chromium.launch(headless=headless)
         context = await self._browser.new_context()
         self._page = await context.new_page()
+        self._page.set_default_navigation_timeout(REQUEST_TIMEOUT * 1000)
+        self._page.set_default_timeout(REQUEST_TIMEOUT * 1000)
         return self
 
     # ------------------------------------------------------------------
@@ -131,7 +133,7 @@ class BrowserSession:
         if delay > 0:
             await asyncio.sleep(delay)
         try:
-            await self._page.goto(url, wait_until="networkidle", timeout=REQUEST_TIMEOUT * 1000)
+            await self._page.goto(url, wait_until="networkidle")
         except Exception as e:
             print(f"[SESSION] 페이지 로드 실패 ({url}): {e}")
             raise

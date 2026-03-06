@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, time
+from datetime import date, datetime
 from pydantic import BaseModel, computed_field
 
 
@@ -89,11 +89,13 @@ class GradeItem(BaseModel):
 
 class TimetableEntry(BaseModel):
     course_name: str
-    day_of_week: int                # 0=월 ~ 4=금
-    start_time: time
-    end_time: time
-    location: str
-    professor: str
+    course_code: str = ""
+    professor: str = ""
+    schedule: str = ""              # "월2,3 수2" — 요일+교시 원본
+    room: str = ""
+    credits: str = ""
+    category: str = ""              # 전공선택, 교양 등
+    campus: str = ""
 
 
 class StudentProfile(BaseModel):
@@ -124,6 +126,11 @@ class AcademicSchedule(BaseModel):
     source_site: str = "portal"
 
 
+class SyllabusEntry(BaseModel):
+    course_name: str
+    fields: dict[str, str] = {}
+
+
 class NormalizedOutput(BaseModel):
     """정규화 파이프라인의 최종 출력 컨테이너."""
     semester: str
@@ -135,5 +142,7 @@ class NormalizedOutput(BaseModel):
     notices: list[Notice] = []
     attendance: list[AttendanceRecord] = []
     grades: list[GradeItem] = []
+    timetable: list[TimetableEntry] = []
     academic_schedule: list[AcademicSchedule] = []
+    syllabus: list[SyllabusEntry] = []
     student_profile: StudentProfile | None = None

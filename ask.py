@@ -46,6 +46,24 @@ def _build_system_prompt() -> str:
 6. 날짜/마감 관련은 D-day를 포함하세요.
 7. 시간표 질문 시 "오늘"은 {weekday}입니다. schedule 필드에서 "{weekday[0]}" 가 포함된 항목만 필터하세요.
 
+## 시간표 해석
+schedule 필드는 "요일+교시" 형식입니다. 여러 요일은 공백으로 구분됩니다.
+- 예: "월2,3 수2" → 월요일 2·3교시, 수요일 2교시
+- 예: "화3,4 목3,4" → 화요일 3·4교시, 목요일 3·4교시
+
+교시별 시간:
+| 교시 | 시간 |
+|------|------|
+| 1 | 09:00~09:50 |
+| 2 | 10:00~10:50 |
+| 3 | 11:00~11:50 |
+| 4 | 12:00~12:50 |
+| 5 | 13:00~13:50 |
+| 6 | 14:00~14:50 |
+| 7 | 15:00~15:50 |
+| 8 | 16:00~16:50 |
+| 9 | 17:00~17:50 |
+
 ## 계산 참고
 - 평점(GPA) = Σ(과목학점 × 과목평점) / Σ(과목학점)
 - 평점 등급: A+(4.5), A0(4.0), B+(3.5), B0(3.0), C+(2.5), C0(2.0), D+(1.5), D0(1.0), F(0)
@@ -59,6 +77,7 @@ DATA_FILES = {
     "academics/assignments.json": ("과제/활동", "academics"),
     "academics/attendance.json": ("출석 기록", "academics"),
     "academics/grades.json": ("eclass 성적", "academics"),
+    "academics/syllabus.json": ("강의계획서", "syllabus"),
     "schedule/academic_schedule.json": ("학사일정", "schedule"),
     "schedule/calendar.json": ("캘린더", "schedule"),
     "schedule/timetable.json": ("시간표 (nDRIMS)", "schedule"),
@@ -80,7 +99,7 @@ QUESTION_CATEGORY_MAP = {
     "졸업": ["profile", "schedule"],
     "시간표": ["schedule"],
     "수업": ["schedule", "academics"],
-    "강의": ["schedule", "academics"],
+    "강의": ["schedule", "academics", "syllabus"],
     "공지": ["info"],
     "장학": ["info"],
     "학사일정": ["schedule"],
@@ -91,6 +110,11 @@ QUESTION_CATEGORY_MAP = {
     "프로필": ["profile"],
     "학과": ["profile"],
     "학번": ["profile"],
+    "교재": ["syllabus"],
+    "교수": ["syllabus", "academics"],
+    "강의계획": ["syllabus"],
+    "계획서": ["syllabus"],
+    "교과서": ["syllabus"],
 }
 
 
@@ -143,7 +167,7 @@ def _ask(client: Anthropic, question: str, history: list[dict]) -> str:
 
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
-        max_tokens=2048,
+        max_tokens=4096,
         system=_build_system_prompt() + "\n\n" + context,
         messages=history,
     )

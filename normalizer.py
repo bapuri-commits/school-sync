@@ -13,7 +13,7 @@ from config import CURRENT_SEMESTER, OUTPUT_DIR
 from models import (
     Course, CalendarEvent, Deadline, Assignment,
     Notice, AttendanceRecord, GradeItem, AcademicSchedule,
-    StudentProfile, NormalizedOutput,
+    StudentProfile, TimetableEntry, SyllabusEntry, NormalizedOutput,
 )
 
 RAW_ECLASS = OUTPUT_DIR / "raw" / "eclass"
@@ -28,6 +28,17 @@ KST = timezone(timedelta(hours=9))
 _TITLE_KEYS = ("제목", "title", "col_1")
 _AUTHOR_KEYS = ("작성자", "author", "col_2")
 _DATE_KEYS = ("작성일", "date", "등록일", "col_3")
+
+
+def _normalize_date_str(date_str: str) -> str:
+    """다양한 날짜 형식을 YYYY-MM-DD로 통일한다."""
+    if not date_str or not isinstance(date_str, str):
+        return date_str or ""
+    s = date_str.strip()
+    m = re.match(r'^(\d{4})[./\-](\d{1,2})[./\-](\d{1,2})', s)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    return s
 
 
 def _first_match(d: dict, keys: tuple[str, ...], default: str = "") -> str:
@@ -74,28 +85,35 @@ def normalize_courses(raw: dict) -> list[Course]:
 def normalize_calendar(raw: dict, enrolled_names: set[str] | None = None) -> list[CalendarEvent]:
     results = []
     for evt in raw.get("calendar_events", []):
-        start = _unix_to_datetime(evt.get("time_start"))
-        if not start:
-            continue
-
-        course_name = evt.get("course_name") or None
-        if enrolled_names and course_name:
-            if not any(course_name in n or n in course_name for n in enrolled_names):
+        try:
+            time_start = evt.get("time_start")
+            if time_start is None:
+                continue
+            start = _unix_to_datetime(time_start)
+            if not start:
                 continue
 
-        duration = evt.get("time_duration", 0) or 0
-        end = _unix_to_datetime(evt["time_start"] + duration) if duration > 0 else None
+            course_name = evt.get("course_name") or None
+            if enrolled_names and course_name:
+                if not any(course_name in n or n in course_name for n in enrolled_names):
+                    continue
 
-        results.append(CalendarEvent(
-            id=evt.get("id"),
-            title=_strip_is_due(evt.get("name", "")),
-            course_name=course_name,
-            start_at=start,
-            end_at=end,
-            event_type=evt.get("event_type", ""),
-            url=evt.get("url", ""),
-            source_site="eclass",
-        ))
+            duration = evt.get("time_duration", 0) or 0
+            end = _unix_to_datetime(time_start + duration) if duration > 0 else None
+
+            results.append(CalendarEvent(
+                id=evt.get("id"),
+                title=_strip_is_due(evt.get("name", "")),
+                course_name=course_name,
+                start_at=start,
+                end_at=end,
+                event_type=evt.get("event_type", ""),
+                url=evt.get("url", ""),
+                source_site="eclass",
+            ))
+        except (TypeError, ValueError, KeyError) as e:
+            print(f"  [경고] 캘린더 이벤트 파싱 실패: {e}")
+            continue
     return results
 
 
@@ -165,7 +183,7 @@ def normalize_notices(raw: dict, courses: list[Course]) -> list[Notice]:
                         board_name=board_name,
                         course_name=course_name,
                         author=_first_match(post, _AUTHOR_KEYS),
-                        date=_first_match(post, _DATE_KEYS),
+                        date=_normalize_date_str(_first_match(post, _DATE_KEYS)),
                         url=post.get("_link", ""),
                         category=board_name,
                         source_site="eclass",
@@ -194,7 +212,7 @@ def normalize_attendance(raw: dict, courses: list[Course]) -> list[AttendanceRec
                 results.append(AttendanceRecord(
                     course_name=course_name,
                     week=week,
-                    date=rec.get("출결 날짜", ""),
+                    date=_normalize_date_str(rec.get("출결 날짜", "")),
                     period=rec.get("교시", ""),
                     status=_attendance_status(rec),
                 ))
@@ -266,7 +284,7 @@ def _normalize_portal_notices(portal_raw: dict) -> list[Notice]:
                 board_name=board_name,
                 course_name="",
                 author="",
-                date=post.get("date", ""),
+                date=_normalize_date_str(post.get("date", "")),
                 url=post.get("url", ""),
                 category=category,
                 source_site="portal",
@@ -381,7 +399,7 @@ def _normalize_ndrims_grades(grades_raw: dict) -> list[dict]:
     return result
 
 
-def _normalize_ndrims_timetable(tt_raw: dict) -> list[dict]:
+def _normalize_ndrims_timetable(tt_raw: dict) -> list[TimetableEntry]:
     """nDRIMS 개인 시간표를 정규화한다."""
     result = []
     courses = None
@@ -395,18 +413,39 @@ def _normalize_ndrims_timetable(tt_raw: dict) -> list[dict]:
         return result
 
     for item in courses:
-        result.append({
-            "course_name": item.get("SBJ_NM", ""),
-            "course_code": item.get("SBJ_NO", ""),
-            "professor": item.get("EMP_NM", ""),
-            "schedule": item.get("TMTBL_KOR_DSC", ""),
-            "room": item.get("ROOM_KOR_DSC", ""),
-            "credits": item.get("CDT", ""),
-            "category": item.get("CPDIV_NM", ""),
-            "campus": item.get("LESN_REGN_CD_NM", ""),
-        })
+        result.append(TimetableEntry(
+            course_name=item.get("SBJ_NM", ""),
+            course_code=item.get("SBJ_NO", ""),
+            professor=item.get("EMP_NM", ""),
+            schedule=item.get("TMTBL_KOR_DSC", ""),
+            room=item.get("ROOM_KOR_DSC", ""),
+            credits=str(item.get("CDT", "")),
+            category=item.get("CPDIV_NM", ""),
+            campus=item.get("LESN_REGN_CD_NM", ""),
+        ))
 
     return result
+
+
+def _normalize_syllabus(raw: dict, courses: list[Course]) -> list[SyllabusEntry]:
+    """각 과목의 syllabus raw 데이터를 SyllabusEntry로 변환한다."""
+    results = []
+    course_map = {c.id: c for c in courses}
+
+    for course_data in raw.get("courses", []):
+        cid = course_data["id"]
+        course = course_map.get(cid)
+        course_name = course.short_name if course else course_data.get("name", "")
+
+        syl_data = course_data.get("syllabus", {})
+        if isinstance(syl_data, dict) and "_error" not in syl_data and "_raw_text" not in syl_data:
+            fields = {k: v for k, v in syl_data.items() if not k.startswith("_") and v}
+            if fields:
+                results.append(SyllabusEntry(
+                    course_name=course_name,
+                    fields=fields,
+                ))
+    return results
 
 
 def _normalize_dept_notices(dept_raw: dict) -> list[Notice]:
@@ -425,7 +464,7 @@ def _normalize_dept_notices(dept_raw: dict) -> list[Notice]:
                     board_name=board_name,
                     course_name="",
                     author=post.get("author", ""),
-                    date=post.get("date", ""),
+                    date=_normalize_date_str(post.get("date", "")),
                     url=post.get("url", ""),
                     category=category,
                     source_site="department",
@@ -454,6 +493,7 @@ def normalize(semester: str = "") -> NormalizedOutput:
     notices = normalize_notices(raw, courses)
     attendance = normalize_attendance(raw, courses)
     grades = normalize_grades(raw, courses)
+    syllabus = _normalize_syllabus(raw, courses)
 
     # --- portal ---
     academic_schedule = []
@@ -470,7 +510,7 @@ def normalize(semester: str = "") -> NormalizedOutput:
     # --- ndrims ---
     student_profile = None
     ndrims_grade_history = []
-    ndrims_timetable = []
+    timetable = []
     ndrims_raw = _load_json(RAW_NDRIMS / "ndrims.json")
     if ndrims_raw:
         if "profile" in ndrims_raw:
@@ -478,7 +518,7 @@ def normalize(semester: str = "") -> NormalizedOutput:
         if "grades" in ndrims_raw:
             ndrims_grade_history = _normalize_ndrims_grades(ndrims_raw["grades"])
         if "timetable" in ndrims_raw:
-            ndrims_timetable = _normalize_ndrims_timetable(ndrims_raw["timetable"])
+            timetable = _normalize_ndrims_timetable(ndrims_raw["timetable"])
 
     output = NormalizedOutput(
         semester=semester,
@@ -490,19 +530,20 @@ def normalize(semester: str = "") -> NormalizedOutput:
         notices=notices,
         attendance=attendance,
         grades=grades,
+        timetable=timetable,
         academic_schedule=academic_schedule,
+        syllabus=syllabus,
         student_profile=student_profile,
     )
 
-    _save_normalized(output, ndrims_grade_history, ndrims_timetable)
+    _save_normalized(output, ndrims_grade_history)
     _generate_briefing(output)
     _print_summary(output)
     return output
 
 
 def _save_normalized(output: NormalizedOutput,
-                     ndrims_grade_history: list = None,
-                     ndrims_timetable: list = None):
+                     ndrims_grade_history: list = None):
     def _write(path: Path, data):
         path.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(data, list):
@@ -522,7 +563,6 @@ def _save_normalized(output: NormalizedOutput,
         )
 
     ndrims_grade_history = ndrims_grade_history or []
-    ndrims_timetable = ndrims_timetable or []
 
     academics = NORM_DIR / "academics"
     _write(academics / "courses.json", output.courses)
@@ -530,10 +570,12 @@ def _save_normalized(output: NormalizedOutput,
     _write(academics / "assignments.json", output.assignments)
     _write(academics / "attendance.json", output.attendance)
     _write(academics / "grades.json", output.grades)
+    _write(academics / "syllabus.json", output.syllabus)
 
     schedule = NORM_DIR / "schedule"
     _write(schedule / "calendar.json", output.calendar)
     _write(schedule / "academic_schedule.json", output.academic_schedule)
+    _write(schedule / "timetable.json", output.timetable)
 
     info = NORM_DIR / "info"
     _write(info / "notices.json", output.notices)
@@ -544,8 +586,6 @@ def _save_normalized(output: NormalizedOutput,
 
     if ndrims_grade_history:
         _write_raw(NORM_DIR / "profile" / "grade_history.json", ndrims_grade_history)
-    if ndrims_timetable:
-        _write_raw(NORM_DIR / "schedule" / "timetable.json", ndrims_timetable)
 
     # 이전 flat 구조 파일 정리
     for old_file in ["courses.json", "deadlines.json", "assignments.json", "attendance.json",
@@ -643,7 +683,9 @@ def _print_summary(output: NormalizedOutput):
     print(f"  공지: {len(output.notices)}개")
     print(f"  출석: {len(output.attendance)}개 기록")
     print(f"  성적: {len(output.grades)}개 항목")
+    print(f"  시간표: {len(output.timetable)}개 과목")
     print(f"  학사일정: {len(output.academic_schedule)}개")
+    print(f"  강의계획서: {len(output.syllabus)}개")
     if output.student_profile:
         p = output.student_profile
         print(f"  프로필: {p.name} | {p.major} {p.grade}학년 | 평점 {p.gpa} | {p.total_credits}학점")

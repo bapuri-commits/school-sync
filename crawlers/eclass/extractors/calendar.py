@@ -10,14 +10,16 @@ AJAX_ENDPOINT = f"{BASE_URL}/lib/ajax/service.php"
 
 def _semester_start_timestamp() -> int:
     """현재 학기 시작일의 Unix timestamp를 반환한다."""
-    year = int(CURRENT_SEMESTER.split("-")[0])
-    sem = int(CURRENT_SEMESTER.split("-")[1])
-    if sem == 1:
-        import datetime
-        return int(datetime.datetime(year, 3, 1).timestamp())
-    else:
-        import datetime
-        return int(datetime.datetime(year, 9, 1).timestamp())
+    import datetime as _dt
+    parts = CURRENT_SEMESTER.split("-")
+    try:
+        year = int(parts[0])
+        sem = int(parts[1]) if len(parts) > 1 else 1
+    except (ValueError, IndexError):
+        year = _dt.date.today().year
+        sem = 1
+    month = 3 if sem == 1 else 9
+    return int(_dt.datetime(year, month, 1).timestamp())
 
 
 async def extract_calendar_events(cookies: dict, sesskey: str) -> list[dict]:
