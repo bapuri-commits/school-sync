@@ -123,7 +123,8 @@ output/
 │   │   ├── deadlines.json
 │   │   ├── assignments.json
 │   │   ├── attendance.json
-│   │   └── grades.json
+│   │   ├── grades.json
+│   │   └── syllabus.json             # 강의계획서 (교재/수업계획/교수정보)
 │   ├── schedule/
 │   │   ├── calendar.json
 │   │   ├── academic_schedule.json
@@ -156,9 +157,10 @@ python main.py --site eclass --download     # 수업자료 다운로드 포함
 ### LLM Q&A
 
 ```bash
-python ask.py                               # 대화 모드
+python ask.py                               # 대화 모드 (웹검색 ON)
 python ask.py "오늘 시간표 알려줘"            # 단일 질문
-python ask.py --refresh                      # 데이터 갱신 후 대화
+python ask.py --refresh                      # 정규화 재실행 후 대화
+python ask.py --no-search                    # 웹검색 OFF (로컬 데이터만)
 ```
 
 ---
@@ -194,11 +196,12 @@ python ask.py --refresh                      # 데이터 갱신 후 대화
 
 ## 8. LLM Q&A (ask.py)
 
-- Anthropic Claude API 사용
-- 질문 분류 → 관련 데이터 파일만 로드 → 답변
-- 데이터 출처 인용 (`[출처: ...]`)
-- 오늘 날짜/요일 자동 주입
-- 대화 맥락 유지 (세션 내)
+- Anthropic Claude API 사용 + 빌트인 웹검색(`web_search_20250305`)
+- **하이브리드 모드**: 로컬 크롤링 데이터 우선 → 부족하면 웹검색 자동 수행
+- 질문 키워드 분류 → 관련 데이터만 로드 (토큰 예산 30K자 제한)
+- 스마트 필터링: notices(최근 7일/과목별), attendance(결석만), grades(과목별), schedule(향후 30일)
+- 데이터 출처 인용 (`[출처: ...]`, `[출처: 웹검색]`)
+- `--no-search`: 웹검색 비활성화 (로컬 데이터만 사용)
 
 ---
 

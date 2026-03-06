@@ -11,9 +11,20 @@ sites:
   portal:
     base_url: "https://www.dongguk.edu"
     enabled: true
+    schedule_info_seq: 22
   department:
     base_url: "https://ai.dongguk.edu"
     enabled: true
+    boards:
+      - key: "notices"
+        path: "notice"
+        label: "학과공지"
+      - key: "external_notices"
+        path: "notice2"
+        label: "특강/공모전/취업"
+      - key: "college_data"
+        path: "collegedata"
+        label: "학사자료"
   ndrims:
     base_url: "https://ndrims.dongguk.edu"
     enabled: true

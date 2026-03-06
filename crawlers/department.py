@@ -8,7 +8,9 @@ import json
 from pathlib import Path
 
 from browser import BrowserSession
-from config import OUTPUT_DIR, SITES, REQUEST_DELAY
+from config import OUTPUT_DIR, SITES, REQUEST_DELAY, REQUEST_TIMEOUT
+
+_GOTO_TIMEOUT = int(REQUEST_TIMEOUT * 1000)
 from crawlers.base import BaseCrawler
 from cache import is_new_or_updated, mark_collected, content_hash
 
@@ -34,13 +36,15 @@ class DepartmentCrawler(BaseCrawler):
         page = session.page
         result = {}
 
-        boards = [
-            ("notices", "notice", "학과공지"),
-            ("external_notices", "notice2", "특강/공모전/취업"),
-            ("college_data", "collegedata", "학사자료"),
+        default_boards = [
+            {"key": "notices", "path": "notice", "label": "학과공지"},
+            {"key": "external_notices", "path": "notice2", "label": "특강/공모전/취업"},
+            {"key": "college_data", "path": "collegedata", "label": "학사자료"},
         ]
+        boards = _dept_cfg.get("boards", default_boards)
 
-        for key, path, label in boards:
+        for b in boards:
+            key, path, label = b["key"], b["path"], b["label"]
             try:
                 posts = await self._extract_notices(page, board_path=path, board_label=label)
                 result[key] = posts
@@ -49,7 +53,8 @@ class DepartmentCrawler(BaseCrawler):
                 result[key] = {"_error": str(e)}
 
         _save_json(result, RAW_DIR / "notices.json")
-        for key, _, label in boards:
+        for b in boards:
+            key, label = b["key"], b["label"]
             count = len(result.get(key, []))
             if isinstance(result.get(key), list) and count > 0:
                 body_count = sum(1 for p in result[key] if p.get("_body"))
@@ -63,7 +68,7 @@ class DepartmentCrawler(BaseCrawler):
         all_posts = []
         for page_idx in range(1, max_pages + 1):
             url = f"{BASE_URL}/article/{board_path}/list?pageIndex={page_idx}"
-            await page.goto(url, wait_until="networkidle")
+            await page.goto(url, wait_until="networkidle", timeout=_GOTO_TIMEOUT)
 
             posts = await page.evaluate("""
                 () => {
@@ -120,7 +125,7 @@ class DepartmentCrawler(BaseCrawler):
     async def _extract_post_body(self, page, detail_url: str) -> dict:
         """글 상세 페이지에서 본문과 첨부파일을 추출한다."""
         try:
-            await page.goto(detail_url, wait_until="networkidle")
+            await page.goto(detail_url, wait_until="networkidle", timeout=_GOTO_TIMEOUT)
 
             data = await page.evaluate("""
                 () => {

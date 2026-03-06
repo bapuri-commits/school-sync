@@ -7,7 +7,9 @@ import json
 from pathlib import Path
 
 from browser import BrowserSession
-from config import OUTPUT_DIR, SITES
+from config import OUTPUT_DIR, SITES, REQUEST_TIMEOUT
+
+_GOTO_TIMEOUT = int(REQUEST_TIMEOUT * 1000)
 from crawlers.base import BaseCrawler
 
 RAW_DIR = OUTPUT_DIR / "raw" / "portal"
@@ -64,7 +66,7 @@ class PortalCrawler(BaseCrawler):
         all_posts = []
         for page_idx in range(1, max_pages + 1):
             url = f"{BASE_URL}/article/{board_code}/list?pageIndex={page_idx}"
-            await page.goto(url, wait_until="networkidle")
+            await page.goto(url, wait_until="networkidle", timeout=_GOTO_TIMEOUT)
 
             posts = await page.evaluate("""
                 (boardCode) => {
@@ -115,8 +117,9 @@ class PortalCrawler(BaseCrawler):
 
     async def _extract_schedule(self, page) -> list[dict]:
         """학사일정 페이지에서 일정 목록을 추출한다."""
-        url = f"{BASE_URL}/schedule/detail?schedule_info_seq=22"
-        await page.goto(url, wait_until="networkidle")
+        seq = _portal_cfg.get("schedule_info_seq", 22)
+        url = f"{BASE_URL}/schedule/detail?schedule_info_seq={seq}"
+        await page.goto(url, wait_until="networkidle", timeout=_GOTO_TIMEOUT)
 
         events = await page.evaluate("""
             () => {
