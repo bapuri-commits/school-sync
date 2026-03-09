@@ -57,7 +57,7 @@ async def download_materials(
             continue
         seen_urls.add(url)
 
-        if not is_new_or_updated(url):
+        if source_type != "board" and not is_new_or_updated(url):
             print(f"    [캐시] {name}: 이미 다운로드됨, 스킵")
             continue
 
