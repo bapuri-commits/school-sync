@@ -8,7 +8,9 @@ import re
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from config import REQUEST_DELAY, MIN_DOWNLOAD_SIZE_BYTES, OUTPUT_DIR
+from config import REQUEST_DELAY, MIN_DOWNLOAD_SIZE_BYTES, OUTPUT_DIR, REQUEST_TIMEOUT
+
+_GOTO_TIMEOUT = int(REQUEST_TIMEOUT * 1000)
 from cache import is_new_or_updated, mark_collected
 
 DOWNLOADS_DIR = OUTPUT_DIR / "downloads"
@@ -90,7 +92,7 @@ async def download_materials(
 
 async def _download_folder(page, url: str, name: str, dest_dir: Path) -> list[dict]:
     """Moodle folder 모듈 페이지에서 파일들을 다운로드한다."""
-    await page.goto(url, wait_until="networkidle")
+    await page.goto(url, wait_until="networkidle", timeout=_GOTO_TIMEOUT)
 
     file_links = await page.evaluate("""
         () => {
@@ -143,7 +145,7 @@ async def _download_resource(page, url: str, name: str, dest_dir: Path) -> dict 
     if info:
         return info
 
-    await page.goto(url, wait_until="networkidle")
+    await page.goto(url, wait_until="networkidle", timeout=_GOTO_TIMEOUT)
     file_links = await page.evaluate("""
         () => {
             const links = [];
@@ -166,7 +168,7 @@ async def _download_board_attachments(
     page, article_url: str, title: str, dest_dir: Path,
 ) -> list[dict]:
     """게시판 글의 첨부파일들을 다운로드한다."""
-    await page.goto(article_url, wait_until="networkidle")
+    await page.goto(article_url, wait_until="networkidle", timeout=_GOTO_TIMEOUT)
 
     attachments = await page.evaluate("""
         () => {

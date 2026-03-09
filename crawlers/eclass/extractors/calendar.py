@@ -10,16 +10,14 @@ AJAX_ENDPOINT = f"{BASE_URL}/lib/ajax/service.php"
 
 def _semester_start_timestamp() -> int:
     """현재 학기 시작일의 Unix timestamp를 반환한다."""
-    import datetime as _dt
-    parts = CURRENT_SEMESTER.split("-")
-    try:
-        year = int(parts[0])
-        sem = int(parts[1]) if len(parts) > 1 else 1
-    except (ValueError, IndexError):
-        year = _dt.date.today().year
-        sem = 1
-    month = 3 if sem == 1 else 9
-    return int(_dt.datetime(year, month, 1).timestamp())
+    year = int(CURRENT_SEMESTER.split("-")[0])
+    sem = int(CURRENT_SEMESTER.split("-")[1])
+    if sem == 1:
+        import datetime
+        return int(datetime.datetime(year, 3, 1).timestamp())
+    else:
+        import datetime
+        return int(datetime.datetime(year, 9, 1).timestamp())
 
 
 async def extract_calendar_events(cookies: dict, sesskey: str) -> list[dict]:
@@ -46,24 +44,35 @@ async def extract_calendar_events(cookies: dict, sesskey: str) -> list[dict]:
             json=payload,
         )
         response.raise_for_status()
-        data = response.json()
+
+        try:
+            data = response.json()
+        except Exception as e:
+            print(f"  [CALENDAR] JSON 파싱 실패: {e}")
+            return []
 
         events = []
-        if isinstance(data, list) and len(data) > 0:
-            item = data[0]
-            if not item.get("error"):
-                raw_events = item.get("data", {}).get("events", [])
-                for evt in raw_events:
-                    events.append({
-                        "id": evt.get("id"),
-                        "name": evt.get("name"),
-                        "description": evt.get("description", ""),
-                        "course_name": evt.get("course", {}).get("fullname", ""),
-                        "time_start": evt.get("timestart"),
-                        "time_duration": evt.get("timeduration"),
-                        "event_type": evt.get("eventtype"),
-                        "url": evt.get("url", ""),
-                    })
+        if not isinstance(data, list) or len(data) == 0:
+            print(f"  [CALENDAR] 예상과 다른 응답 형식: {type(data).__name__}")
+            return events
+
+        item = data[0]
+        if item.get("error"):
+            print(f"  [CALENDAR] API 에러: {item.get('exception', {}).get('message', item['error'])}")
+            return events
+
+        raw_events = item.get("data", {}).get("events", [])
+        for evt in raw_events:
+            events.append({
+                "id": evt.get("id"),
+                "name": evt.get("name"),
+                "description": evt.get("description", ""),
+                "course_name": evt.get("course", {}).get("fullname", ""),
+                "time_start": evt.get("timestart"),
+                "time_duration": evt.get("timeduration"),
+                "event_type": evt.get("eventtype"),
+                "url": evt.get("url", ""),
+            })
 
     print(f"  [CALENDAR] {len(events)}개 이벤트")
     return events
