@@ -10,7 +10,7 @@ school_sync 통합 크롤러 메인 진입점.
   python main.py --site eclass --only syllabus grades  # 특정 데이터만
   python main.py --site eclass --download     # 수업자료 다운로드 포함
   python main.py --site eclass --test         # 첫 과목만 (테스트)
-  python main.py --normalize-only             # 정규화만 (이미 raw 있을 때)
+  python main.py --normalize-only             # 정규화 + 컨텍스트 생성만 (이미 raw 있을 때)
 """
 
 import argparse
@@ -32,6 +32,7 @@ from crawlers.portal import PortalCrawler
 from crawlers.department import DepartmentCrawler
 from crawlers.ndrims import NdrimsCrawler
 from normalizer import normalize
+from context_export import export_all as export_context
 
 
 CRAWLERS = {
@@ -111,6 +112,7 @@ def _should_normalize(args) -> bool:
 async def run(args):
     if args.normalize_only:
         normalize()
+        export_context()
         return
 
     sites = _resolve_sites(args)
@@ -155,6 +157,7 @@ async def run(args):
 
     if _should_normalize(args):
         normalize()
+        export_context()
 
 
 if __name__ == "__main__":

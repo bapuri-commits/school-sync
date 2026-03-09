@@ -15,10 +15,11 @@
 
 ```
 school_sync (독립 실행 가능)
-├── 크롤링 (main.py)         → output/raw/
-├── 정규화 (normalizer.py)    → output/normalized/
-├── 브리핑 (briefing.md)      → The_Agent/사용자 소비
-└── Q&A (ask.py)              → 독립 CLI 인터페이스
+├── 크롤링 (main.py)             → output/raw/
+├── 정규화 (normalizer.py)        → output/normalized/
+├── 학습 컨텍스트 (context_export) → output/context/   ← lesson-assist 소비
+├── 브리핑 (briefing.md)          → The_Agent/사용자 소비
+└── Q&A (ask.py)                  → 독립 CLI 인터페이스
 
 The_Agent (미래 통합)
 ├── school_sync  ← 학교 생활 (파일 인터페이스)
@@ -31,7 +32,7 @@ The_Agent (미래 통합)
 | 프로젝트 | 역할 | school_sync와의 관계 |
 |----------|------|---------------------|
 | `eclass_crawler` | e-Class LMS 크롤러 (완성) | school_sync에 흡수됨 |
-| `lesson-assist` | 강의녹음 → 요약 → 옵시디언 | eclass raw output을 소비 (호환 유지) |
+| `lesson-assist` | 학습 패키징 + 노트 생성 | `output/context/` 과목별 컨텍스트 + `output/downloads/` 수업자료를 소비 |
 | `The_Agent` | 개인 AI 비서 | normalized output + briefing.md를 소비 |
 | `The Record` | 옵시디언 볼트 | Obsidian 동기화 대상 (미래) |
 
@@ -48,6 +49,7 @@ school_sync/
 ├── browser.py                      # Playwright BrowserSession
 ├── models.py                       # Pydantic 정규화 스키마
 ├── normalizer.py                   # Raw → Normalized 변환
+├── context_export.py               # 과목별 학습 컨텍스트 생성 → output/context/
 ├── requirements.txt
 ├── .env.example
 ├── .gitignore
