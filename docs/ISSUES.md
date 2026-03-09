@@ -48,7 +48,7 @@
 
 - [x] **ask.py 웹검색 연동** — Anthropic 빌트인 `web_search_20250305` 도구 추가. 로컬 데이터 부족 시 자동 웹검색. `--no-search` 옵션.
 - [x] **토큰 예산 관리** — `MAX_CONTEXT_CHARS=30,000` 제한. 파일별 우선순위(5~50)로 정렬하여 중요 데이터 우선 로드.
-- [x] **스마트 필터링** — notices(과목별/최근 7일), attendance(결석만, 빈 결과 시 전체 폴백), grades(과목별), academic_schedule(향후 30일).
+- [x] **스마트 필터링** — notices(과목별/최근 7일), attendance(결석/지각/조퇴/유고결석, 빈 결과 시 전체 폴백), grades(과목별), academic_schedule(향후 30일).
 - [x] **system prompt 하이브리드 모드** — 로컬 데이터 우선 + 웹검색 보완. 출처 구분(`[출처: 시간표]` vs `[출처: 웹검색]`).
 - [x] **미사용 import 제거** — ask.py에서 `re`, `Path` 제거.
 

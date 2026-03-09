@@ -223,7 +223,7 @@ async def _try_download(page, url: str, name: str, dest_dir: Path) -> dict | Non
 
     try:
         async with page.expect_download(timeout=10000) as download_info:
-            await page.goto(dl_url)
+            await page.goto(dl_url, timeout=_GOTO_TIMEOUT)
 
         download = await download_info.value
         suggested = download.suggested_filename
