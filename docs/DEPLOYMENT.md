@@ -4,6 +4,8 @@
 
 > Contabo VPS에서 cron으로 대학 시스템 데이터를 주기적으로 크롤링하는 절차.
 > DevOps 학습 로드맵 Stage 7에서 사용.
+>
+> **참조**: DevOps 로드맵 전체는 `SyOps/docs/DEVOPS_ROADMAP.md`를 참조하세요.
 
 ---
 
