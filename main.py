@@ -15,7 +15,10 @@ school_sync 통합 크롤러 메인 진입점.
 
 import argparse
 import asyncio
+import json
 import sys
+from datetime import datetime
+from pathlib import Path
 
 # Windows cp949 콘솔 한글 깨짐 방지
 if sys.platform == "win32":
@@ -158,6 +161,23 @@ async def run(args):
     if _should_normalize(args):
         normalize()
         export_context()
+
+    _write_run_log(sites, args)
+
+
+def _write_run_log(sites: list[str], args):
+    """실행 기록을 output/.last_run.json에 저장한다."""
+    log_path = Path("output") / ".last_run.json"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    log = {
+        "last_run": datetime.now().isoformat(timespec="seconds"),
+        "sites": sites,
+        "download": getattr(args, "download", False),
+        "test_mode": getattr(args, "test", False),
+    }
+
+    log_path.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":
