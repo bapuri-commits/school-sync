@@ -33,6 +33,24 @@ class BrowserSession:
         self._page.set_default_timeout(REQUEST_TIMEOUT * 1000)
         return self
 
+    async def _dismiss_notice_popups(self):
+        """eClass 로그인 페이지의 공지 팝업(.notice_popup)을 모두 닫는다."""
+        try:
+            await self._page.evaluate("""
+                () => {
+                    document.querySelectorAll('.notice_popup.modal').forEach(popup => {
+                        popup.style.display = 'none';
+                        popup.classList.remove('in', 'show');
+                    });
+                    // backdrop도 제거
+                    document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+                    document.body.classList.remove('modal-open');
+                    document.body.style.overflow = '';
+                }
+            """)
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------
     #  Moodle (eClass) 로그인
     # ------------------------------------------------------------------
@@ -44,6 +62,10 @@ class BrowserSession:
             raise RuntimeError(".env에 SCHOOL_USERNAME/SCHOOL_PASSWORD를 입력해주세요.")
 
         await self._page.goto(f"{BASE_URL}/login/index.php", wait_until="networkidle")
+
+        # 공지 팝업이 로그인 버튼을 가리는 경우 모두 닫기
+        await self._dismiss_notice_popups()
+
         await self._page.fill('input[name="username"]', username)
         await self._page.fill('input[name="password"]', password)
         await self._page.click('button[type="submit"], input[type="submit"], #loginbtn')

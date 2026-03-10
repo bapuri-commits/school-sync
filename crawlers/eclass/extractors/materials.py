@@ -4,7 +4,9 @@ Moodle resource/folder 활동 및 게시판 첨부파일을 다운로드한다.
 """
 
 import asyncio
+import json
 import re
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -80,14 +82,50 @@ async def download_materials(
 
         await asyncio.sleep(REQUEST_DELAY)
 
+    now_iso = datetime.now().isoformat(timespec="seconds")
     for r in results:
-        if "path" in r and "url" in r:
-            mark_collected(r["url"])
+        if "path" in r:
+            r["downloaded_at"] = now_iso
+            if "url" in r:
+                mark_collected(r["url"])
 
     total = len(results)
     success = len([r for r in results if "path" in r])
     print(f"  [MATERIALS] course={course_id}: {success}/{total}개 다운로드")
+
+    _update_manifest(course_dir, results)
     return results
+
+
+def _update_manifest(course_dir: Path, new_results: list[dict]):
+    """과목별 다운로드 매니페스트를 갱신한다.
+
+    manifest.json: 다운로드한 파일들의 이름, 경로, 크기, 다운로드 시각을 기록.
+    lesson-assist가 날짜 기반 자료 매칭에 활용할 수 있다.
+    """
+    manifest_path = course_dir / "manifest.json"
+    existing: list[dict] = []
+    if manifest_path.exists():
+        try:
+            existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            existing = []
+
+    known_files = {e["filename"] for e in existing if "filename" in e}
+    for r in new_results:
+        if "path" in r and r.get("filename") not in known_files:
+            existing.append({
+                "filename": r["filename"],
+                "name": r.get("name", ""),
+                "size_kb": r.get("size_kb", 0),
+                "downloaded_at": r.get("downloaded_at", ""),
+                "url": r.get("url", ""),
+            })
+
+    manifest_path.write_text(
+        json.dumps(existing, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 async def _download_folder(page, url: str, name: str, dest_dir: Path) -> list[dict]:

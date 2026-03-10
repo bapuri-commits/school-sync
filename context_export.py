@@ -20,12 +20,16 @@ NORM_DIR = OUTPUT_DIR / "normalized"
 CONTEXT_DIR = OUTPUT_DIR / "context"
 
 
-def export_all() -> int:
+def export_all(target_date: date | None = None) -> int:
     """모든 수강 과목의 학습 컨텍스트를 생성한다.
+
+    Args:
+        target_date: 컨텍스트 기준 날짜. None이면 오늘.
 
     Returns:
         생성된 컨텍스트 파일 수.
     """
+    ref = target_date or date.today()
     courses = _load_json(NORM_DIR / "academics" / "courses.json")
     if not courses:
         print("[context_export] courses.json이 없습니다. 정규화를 먼저 실행하세요.")
@@ -39,12 +43,12 @@ def export_all() -> int:
     CONTEXT_DIR.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{'─'*40}")
-    print("  학습 컨텍스트 생성")
+    print(f"  학습 컨텍스트 생성 (기준일: {ref})")
     print(f"{'─'*40}")
 
     generated = 0
     for name in course_names:
-        content = build_context(name)
+        content = build_context(name, target_date=ref)
         if content:
             path = CONTEXT_DIR / f"{name}.md"
             path.write_text(content, encoding="utf-8")
@@ -57,8 +61,37 @@ def export_all() -> int:
     return generated
 
 
-def build_context(course: str) -> str:
-    """특정 과목의 학습 컨텍스트 마크다운을 생성한다."""
+def export_course(course: str, target_date: date | None = None) -> Path | None:
+    """특정 과목의 학습 컨텍스트를 (재)생성한다.
+
+    Args:
+        course: 과목 short_name.
+        target_date: 컨텍스트 기준 날짜. None이면 오늘.
+
+    Returns:
+        생성된 파일 경로 또는 None.
+    """
+    ref = target_date or date.today()
+    CONTEXT_DIR.mkdir(parents=True, exist_ok=True)
+
+    content = build_context(course, target_date=ref)
+    if not content:
+        return None
+
+    path = CONTEXT_DIR / f"{course}.md"
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def build_context(course: str, target_date: date | None = None) -> str:
+    """특정 과목의 학습 컨텍스트 마크다운을 생성한다.
+
+    Args:
+        course: 과목 short_name.
+        target_date: 컨텍스트 기준 날짜. None이면 오늘.
+    """
+    ref = target_date or date.today()
+
     if not NORM_DIR.exists():
         return ""
 
@@ -72,14 +105,18 @@ def build_context(course: str) -> str:
     if assignments_md:
         sections.append(assignments_md)
 
-    notices_md = _build_notices_section(course)
+    notices_md = _build_notices_section(course, ref)
     if notices_md:
         sections.append(notices_md)
+
+    materials_md = _build_materials_section(course)
+    if materials_md:
+        sections.append(materials_md)
 
     if not sections:
         return ""
 
-    frontmatter = _build_frontmatter(course)
+    frontmatter = _build_frontmatter(course, ref)
     header = f"# {course} 학습 컨텍스트\n\n> school_sync에서 자동 생성됨\n"
     body = "\n---\n\n".join(sections)
 
@@ -158,14 +195,16 @@ def _estimate_semester_start() -> date | None:
     return None
 
 
-def _build_frontmatter(course: str) -> str:
+def _build_frontmatter(course: str, target_date: date | None = None) -> str:
+    ref = target_date or date.today()
     lines = [
         "---",
         f'course: "{course}"',
         f'generated_at: "{datetime.now().isoformat(timespec="seconds")}"',
+        f'target_date: "{ref.isoformat()}"',
     ]
 
-    week_info = get_week_topic(course, date.today().isoformat())
+    week_info = get_week_topic(course, ref.isoformat())
     if week_info:
         week_num, topic = week_info
         lines.append(f"current_week: {week_num}")
@@ -252,25 +291,91 @@ def _build_assignments_section(course: str) -> str:
     return "\n\n".join(parts)
 
 
-def _build_notices_section(course: str) -> str:
+def _build_notices_section(course: str, target_date: date | None = None) -> str:
     data = _load_json(NORM_DIR / "info" / "notices.json")
     if not data or not isinstance(data, list):
         return ""
 
-    cutoff = (date.today() - timedelta(days=14)).isoformat()
+    ref = target_date or date.today()
+    cutoff = (ref - timedelta(days=14)).isoformat()
     matched = [
         n for n in data
         if course in n.get("course_name", "")
         and n.get("date", "") >= cutoff
+        and n.get("date", "") <= ref.isoformat()
     ]
 
     if not matched:
         return ""
 
-    lines = ["## 최근 공지사항\n"]
+    lines = [f"## 최근 공지사항 ({cutoff} ~ {ref.isoformat()})\n"]
     for n in matched[:10]:
         lines.append(f"- [{n.get('date', '')}] **{n.get('title', '?')}**")
         if n.get("board_name"):
             lines.append(f"  - 게시판: {n['board_name']}")
 
     return "\n".join(lines)
+
+
+def _build_materials_section(course: str) -> str:
+    """다운로드된 수업자료 목록을 manifest.json에서 읽어 표시한다."""
+    downloads_dir = OUTPUT_DIR / "downloads"
+    course_dirs = [
+        d for d in downloads_dir.iterdir()
+        if d.is_dir() and course in d.name
+    ] if downloads_dir.exists() else []
+
+    if not course_dirs:
+        return ""
+
+    manifest_path = course_dirs[0] / "manifest.json"
+    data = _load_json(manifest_path)
+    if not data or not isinstance(data, list):
+        return ""
+
+    lines = ["## 수업자료 파일 목록\n"]
+    lines.append("| 파일명 | 크기 | 다운로드 일시 |")
+    lines.append("|--------|------|-------------|")
+    for f in data:
+        dl_at = f.get("downloaded_at", "")[:10]
+        lines.append(f"| {f.get('filename', '?')} | {f.get('size_kb', '?')}KB | {dl_at} |")
+
+    return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────
+#  CLI
+# ──────────────────────────────────────────────
+
+def main():
+    """CLI: python context_export.py [--course NAME] [--date YYYY-MM-DD]"""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="과목별 학습 컨텍스트 생성")
+    parser.add_argument("--course", help="특정 과목만 생성")
+    parser.add_argument("--date", help="기준 날짜 (YYYY-MM-DD, 기본: 오늘)")
+    args = parser.parse_args()
+
+    target = None
+    if args.date:
+        try:
+            target = date.fromisoformat(args.date)
+        except ValueError:
+            print(f"[context_export] 잘못된 날짜 형식: {args.date}")
+            return 1
+
+    if args.course:
+        path = export_course(args.course, target_date=target)
+        if path:
+            print(f"  ✓ {args.course} -> {path}")
+            return 0
+        else:
+            print(f"  ✗ {args.course}: 데이터 없음")
+            return 1
+    else:
+        count = export_all(target_date=target)
+        return 0 if count > 0 else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
