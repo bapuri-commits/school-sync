@@ -49,14 +49,15 @@ async def download_materials(
             continue
         seen_urls.add(url)
 
-        if source_type != "board" and not is_new_or_updated(url):
-            print(f"    [캐시] {name}: 이미 다운로드됨, 스킵")
+        if not is_new_or_updated(url):
+            print(f"    [캐시] {name}: 이미 수집됨, 스킵")
             continue
 
         try:
             if source_type == "board":
                 files = await _download_board_attachments(page, url, name, course_dir)
                 results.extend(files)
+                mark_collected(url)
             elif source_type == "folder":
                 files = await _download_folder(page, url, name, course_dir)
                 results.extend(files)
@@ -295,14 +296,28 @@ async def _try_download(page, url: str, name: str, dest_dir: Path) -> dict | Non
         pass
 
     try:
+        parsed = urlparse(url)
+        guessed_filename = unquote(parsed.path.split("/")[-1], encoding="utf-8")
+        if guessed_filename and "." in guessed_filename:
+            pre_check = dest_dir / guessed_filename
+            if pre_check.exists() and pre_check.stat().st_size >= MIN_DOWNLOAD_SIZE_BYTES:
+                print(f"    [스킵] {guessed_filename}: 이미 존재")
+                return {
+                    "name": name,
+                    "filename": guessed_filename,
+                    "path": str(pre_check),
+                    "size_kb": round(pre_check.stat().st_size / 1024, 1),
+                    "url": url,
+                    "skipped": True,
+                }
+
         response = await page.context.request.get(dl_url)
         if response.ok:
             content_type = response.headers.get("content-type", "")
             if "text/html" in content_type:
                 return None
 
-            parsed = urlparse(url)
-            filename = unquote(parsed.path.split("/")[-1], encoding="utf-8")
+            filename = guessed_filename
             if not filename or "." not in filename:
                 filename = _safe_filename(name)
                 ext = _guess_extension(content_type)
