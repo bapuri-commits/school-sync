@@ -24,16 +24,6 @@ def _safe_filename(name: str) -> str:
     return name
 
 
-def _unique_path(dest_dir: Path, filename: str) -> Path:
-    save_path = dest_dir / filename
-    counter = 1
-    original = save_path
-    while save_path.exists():
-        save_path = dest_dir / f"{original.stem}_{counter}{original.suffix}"
-        counter += 1
-    return save_path
-
-
 async def download_materials(
     page,
     course_id: int,
@@ -84,7 +74,7 @@ async def download_materials(
 
     now_iso = datetime.now().isoformat(timespec="seconds")
     for r in results:
-        if "path" in r:
+        if "path" in r and not r.get("skipped"):
             r["downloaded_at"] = now_iso
             if "url" in r:
                 mark_collected(r["url"])
@@ -253,7 +243,10 @@ async def _download_board_attachments(
 
 
 async def _try_download(page, url: str, name: str, dest_dir: Path) -> dict | None:
-    """파일 다운로드를 시도한다. Playwright download -> API fetch 순서로 폴백."""
+    """파일 다운로드를 시도한다. Playwright download -> API fetch 순서로 폴백.
+
+    이미 같은 이름의 파일이 존재하면 다운로드를 스킵한다.
+    """
     dl_url = url
     if "pluginfile.php" in url and "forcedownload" not in url:
         sep = "&" if "?" in url else "?"
@@ -269,7 +262,20 @@ async def _try_download(page, url: str, name: str, dest_dir: Path) -> dict | Non
             parsed = urlparse(url)
             suggested = unquote(parsed.path.split("/")[-1]) or _safe_filename(name)
 
-        save_path = _unique_path(dest_dir, suggested)
+        existing = dest_dir / suggested
+        if existing.exists() and existing.stat().st_size >= MIN_DOWNLOAD_SIZE_BYTES:
+            print(f"    [스킵] {suggested}: 이미 존재")
+            await download.delete()
+            return {
+                "name": name,
+                "filename": suggested,
+                "path": str(existing),
+                "size_kb": round(existing.stat().st_size / 1024, 1),
+                "url": url,
+                "skipped": True,
+            }
+
+        save_path = dest_dir / suggested
         await download.save_as(str(save_path))
         file_size = save_path.stat().st_size
         if file_size < MIN_DOWNLOAD_SIZE_BYTES:
@@ -303,7 +309,19 @@ async def _try_download(page, url: str, name: str, dest_dir: Path) -> dict | Non
                 if ext and not filename.endswith(ext):
                     filename += ext
 
-            save_path = _unique_path(dest_dir, filename)
+            existing = dest_dir / filename
+            if existing.exists() and existing.stat().st_size >= MIN_DOWNLOAD_SIZE_BYTES:
+                print(f"    [스킵] {filename}: 이미 존재")
+                return {
+                    "name": name,
+                    "filename": filename,
+                    "path": str(existing),
+                    "size_kb": round(existing.stat().st_size / 1024, 1),
+                    "url": url,
+                    "skipped": True,
+                }
+
+            save_path = dest_dir / filename
             body = await response.body()
             if len(body) < MIN_DOWNLOAD_SIZE_BYTES:
                 return None
