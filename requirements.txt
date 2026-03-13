@@ -6,5 +6,6 @@ playwright
 pydantic
 PyJWT
 python-dotenv
+python-multipart
 pyyaml
 uvicorn[standard]
