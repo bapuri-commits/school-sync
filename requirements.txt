@@ -1,6 +1,7 @@
 anthropic
 fastapi
 httpx
+loguru
 playwright
 pydantic
 PyJWT
