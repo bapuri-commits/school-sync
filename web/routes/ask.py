@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
+import time
+from collections import OrderedDict
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
@@ -18,7 +19,10 @@ from ask import _build_system_prompt, _classify_question, _load_context, WEB_SEA
 
 router = APIRouter()
 
-_sessions: dict[str, list[dict]] = {}
+MAX_SESSIONS = 50
+SESSION_TTL = 3600
+
+_sessions: OrderedDict[str, dict] = OrderedDict()
 
 
 class AskRequest(BaseModel):
@@ -27,10 +31,23 @@ class AskRequest(BaseModel):
     session_id: str = "default"
 
 
+def _evict_expired():
+    now = time.time()
+    expired = [k for k, v in _sessions.items() if now - v["ts"] > SESSION_TTL]
+    for k in expired:
+        del _sessions[k]
+    while len(_sessions) > MAX_SESSIONS:
+        _sessions.popitem(last=False)
+
+
 def _get_history(session_id: str) -> list[dict]:
+    _evict_expired()
     if session_id not in _sessions:
-        _sessions[session_id] = []
-    return _sessions[session_id]
+        _sessions[session_id] = {"ts": time.time(), "history": []}
+    entry = _sessions[session_id]
+    entry["ts"] = time.time()
+    _sessions.move_to_end(session_id)
+    return entry["history"]
 
 
 async def _stream_response(question: str, history: list[dict], web_search: bool):
@@ -90,5 +107,6 @@ class ResetRequest(BaseModel):
 @router.post("/ask/reset")
 async def reset_session(body: ResetRequest = ResetRequest(), user: dict = Depends(require_permission("ask"))):
     sid = body.session_id
-    _sessions.pop(sid, None)
+    if sid in _sessions:
+        del _sessions[sid]
     return {"status": "ok", "session_id": sid}

@@ -61,7 +61,9 @@ if FRONTEND_DIR.exists():
         if full_path.startswith("api/"):
             from fastapi.responses import JSONResponse
             return JSONResponse({"detail": "Not Found"}, status_code=404)
-        file_path = FRONTEND_DIR / full_path
+        file_path = (FRONTEND_DIR / full_path).resolve()
+        if not str(file_path).startswith(str(FRONTEND_DIR.resolve())):
+            return FileResponse(FRONTEND_DIR / "index.html")
         if file_path.is_file():
             return FileResponse(file_path)
         return FileResponse(FRONTEND_DIR / "index.html")

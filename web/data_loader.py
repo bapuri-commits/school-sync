@@ -29,7 +29,10 @@ def _read_json(rel_path: str) -> Any:
     path = _base() / rel_path
     if not path.exists():
         return []
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
 
 
 def _read_text(rel_path: str) -> str:
@@ -87,7 +90,10 @@ def last_run() -> dict | None:
     path = _base().parent / ".last_run.json"
     if not path.exists():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def downloads_manifest(course_name: str) -> list[dict]:
@@ -99,7 +105,10 @@ def downloads_manifest(course_name: str) -> list[dict]:
         if d.is_dir() and course_name in d.name:
             manifest = d / "manifest.json"
             if manifest.exists():
-                return json.loads(manifest.read_text(encoding="utf-8"))
+                try:
+                    return json.loads(manifest.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    return []
     return []
 
 

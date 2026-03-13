@@ -59,7 +59,9 @@ def load_permissions() -> dict[str, list[str]]:
     try:
         data = yaml.safe_load(_PERMISSIONS_PATH.read_text(encoding="utf-8")) or {}
         return data.get("users", {})
-    except Exception:
+    except (yaml.YAMLError, OSError) as e:
+        import logging
+        logging.getLogger("studyhub.auth").warning(f"permissions.yaml 로드 실패: {e}")
         return {}
 
 
