@@ -158,7 +158,8 @@ export default function SyncControl() {
   };
 
   const isRunning = taskStatus?.status === "running" || streaming;
-  const SITES = ["eclass", "portal", "department", "ndrims"];
+  const SITES = ["eclass", "portal", "department"];
+  const DISABLED_SITES: Record<string, string> = { ndrims: "수동 로그인 필요 (로컬 전용)" };
 
   return (
     <div className="space-y-6">
@@ -215,6 +216,15 @@ export default function SyncControl() {
                 >
                   {s}
                 </button>
+              ))}
+              {Object.entries(DISABLED_SITES).map(([s, reason]) => (
+                <span
+                  key={s}
+                  title={reason}
+                  className="text-xs px-2.5 py-1 rounded-full border border-[var(--color-border)] text-[var(--color-text-muted)] opacity-40 cursor-not-allowed"
+                >
+                  {s}
+                </span>
               ))}
             </div>
             <label className="flex items-center gap-1.5 text-sm cursor-pointer">

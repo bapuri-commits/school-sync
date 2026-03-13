@@ -94,87 +94,46 @@ class BrowserSession:
         print(f"[SESSION] eClass 로그인 성공: {self._page.url}")
 
     # ------------------------------------------------------------------
-    #  SSO 로그인 (nDRIMS 등)
+    #  SSO 로그인 (nDRIMS — 수동 로그인만 지원)
     # ------------------------------------------------------------------
     async def login_ndrims(self, username: str = "", password: str = ""):
-        """nDRIMS SSO 로그인. headless 자동 로그인을 시도한다."""
-        username = username or SCHOOL_USERNAME
-        password = password or SCHOOL_PASSWORD
+        """nDRIMS SSO 로그인. headed 브라우저에서 수동 로그인을 기다린다.
 
-        if not username or not password:
-            raise RuntimeError(".env에 SCHOOL_USERNAME/SCHOOL_PASSWORD를 입력해주세요.")
-
+        nDRIMS는 2단계 인증(EZGuard) 등 보안 정책으로 자동 로그인 불가.
+        로컬 환경에서 headed 브라우저로만 사용 가능 (Docker 불가).
+        """
         ndrims_cfg = SITES.get("ndrims", {})
         base_url = ndrims_cfg.get("base_url", "https://ndrims.dongguk.edu")
 
+        print(f"[SESSION] nDRIMS 브라우저를 엽니다: {base_url}")
+        print(f"[SESSION] 브라우저에서 SSO 로그인을 완료해주세요.")
+
         self._page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
 
-        print(f"[SESSION] nDRIMS SSO 로그인 시도: {base_url}")
         await self._page.goto(base_url, wait_until="networkidle", timeout=60000)
 
-        # nDRIMS CLX 로그인 — CLX는 fill()을 감지 못하므로 click+type 사용
-        uid_el = await self._page.query_selector('input[type="text"]')
-        pw_el = await self._page.query_selector('input[type="password"]')
-
-        if uid_el and pw_el:
-            await uid_el.click()
-            await uid_el.fill("")
-            await self._page.keyboard.type(username, delay=50)
-
-            await pw_el.click()
-            await pw_el.fill("")
-            await self._page.keyboard.type(password, delay=50)
-
-            await asyncio.sleep(0.5)
-
-            # CLX "로그인" 버튼: A.cl-text-wrapper > DIV.cl-text
-            clicked = await self._page.evaluate("""
-                () => {
-                    const els = document.querySelectorAll('.cl-text');
-                    for (const el of els) {
-                        if (el.innerText.trim() === '로그인') {
-                            const anchor = el.closest('a') || el.parentElement;
-                            if (anchor) { anchor.click(); return 'anchor'; }
-                            el.click();
-                            return 'direct';
-                        }
-                    }
-                    return false;
-                }
-            """)
-            print(f"[SESSION] 로그인 버튼 클릭: {clicked}")
-
-            if not clicked:
-                await self._page.keyboard.press("Enter")
-
-            try:
-                await self._page.wait_for_load_state("networkidle", timeout=30000)
-            except Exception:
-                pass
-            await asyncio.sleep(3)
-        elif "main.clx" in self._page.url:
-            print(f"[SESSION] 이미 로그인된 상태입니다.")
-        else:
-            raise RuntimeError(f"nDRIMS SSO 로그인 실패 — 로그인 폼을 찾을 수 없습니다 ({self._page.url})")
-
-        # SSO 리다이렉트 대기 — main.clx 또는 index.do 이외의 페이지 로드 확인
-        for _ in range(30):
+        for _ in range(120):
             await asyncio.sleep(1)
             url = self._page.url
-            if "main.clx" in url:
-                break
-            if "ndrims" in url and "index.do" not in url and "login" not in url.lower():
+            if "main.clx" in url or ("main" in url and "index" not in url):
                 break
 
-        final_url = self._page.url
-        if "index.do" in final_url:
-            body = await self._page.evaluate("() => document.body?.innerText?.slice(0,100) || ''")
-            raise RuntimeError(f"nDRIMS SSO 로그인 실패 — ID/PW를 확인해주세요. (URL: {final_url}, body: {body[:50]})")
-
-        cookies = await self._page.context.cookies()
-        self.cookies_dict = {c["name"]: c["value"] for c in cookies}
-        self._logged_in = True
-        print(f"[SESSION] nDRIMS 로그인 성공: {self._page.url}")
+        if "main.clx" in self._page.url:
+            self._logged_in = True
+            cookies = await self._page.context.cookies()
+            self.cookies_dict = {c["name"]: c["value"] for c in cookies}
+            print(f"[SESSION] nDRIMS 로그인 성공: {self._page.url}")
+        else:
+            print(f"[SESSION] nDRIMS 로그인 대기 중... 브라우저에서 로그인을 완료해주세요.")
+            try:
+                input(">>> 로그인 완료 후 Enter를 누르세요... ")
+            except (EOFError, KeyboardInterrupt):
+                raise RuntimeError("nDRIMS 로그인 취소됨 (Docker 환경에서는 사용 불가)")
+            await asyncio.sleep(2)
+            cookies = await self._page.context.cookies()
+            self.cookies_dict = {c["name"]: c["value"] for c in cookies}
+            self._logged_in = True
+            print(f"[SESSION] nDRIMS 세션 확보: {self._page.url}")
 
     async def login_sso(self, site_name: str):
         if site_name == "ndrims":
@@ -219,11 +178,13 @@ class BrowserSession:
 async def create_session(headless: bool = True, site: str = "eclass") -> BrowserSession:
     """브라우저 세션을 생성하고, 필요한 사이트에 로그인한다."""
     session = BrowserSession()
-    await session.start(headless=headless)
 
-    if site == "eclass":
-        await session.login_eclass()
-    elif site == "ndrims":
+    if site == "ndrims":
+        await session.start(headless=False)
         await session.login_ndrims()
+    else:
+        await session.start(headless=headless)
+        if site == "eclass":
+            await session.login_eclass()
 
     return session
