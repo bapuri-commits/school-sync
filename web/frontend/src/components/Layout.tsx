@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import type { Permission } from "../types";
@@ -64,6 +64,22 @@ export default function Layout() {
     );
   }
 
+  const redirectUrl = useRef("");
+  useEffect(() => {
+    if ((error || !user) && !loading) {
+      redirectUrl.current = `${SYOPS_LOGIN}?redirect=${encodeURIComponent(window.location.href)}`;
+      const t = setTimeout(() => { window.location.href = redirectUrl.current; }, 1500);
+      return () => clearTimeout(t);
+    }
+  }, [error, user, loading]);
+
+  useEffect(() => {
+    if (sidebarOpen) {
+      document.body.style.overflow = "hidden";
+      return () => { document.body.style.overflow = ""; };
+    }
+  }, [sidebarOpen]);
+
   if (error || !user) {
     const redirect = `${SYOPS_LOGIN}?redirect=${encodeURIComponent(window.location.href)}`;
     return (
@@ -76,7 +92,6 @@ export default function Layout() {
           >
             로그인 페이지로 이동
           </a>
-          <script dangerouslySetInnerHTML={{ __html: `setTimeout(()=>window.location.href="${redirect}",1500)` }} />
         </div>
       </div>
     );

@@ -41,24 +41,31 @@ async def auto_sync_loop():
     logger.info(f"자동 동기화 시작 (간격: {INTERVAL_HOURS}시간)")
 
     while True:
-        _next_auto = (datetime.now() + timedelta(hours=INTERVAL_HOURS)).isoformat(timespec="minutes")
+        try:
+            _next_auto = (datetime.now() + timedelta(hours=INTERVAL_HOURS)).isoformat(timespec="minutes")
 
-        await asyncio.sleep(INTERVAL_HOURS * 3600)
+            await asyncio.sleep(INTERVAL_HOURS * 3600)
 
-        if not _enabled:
-            continue
+            if not _enabled:
+                continue
 
-        if tasks.get_state().status == tasks.TaskStatus.RUNNING:
-            logger.info("수동 태스크 실행 중 — 자동 동기화 건너뜀")
-            continue
+            if tasks.get_state().status == tasks.TaskStatus.RUNNING:
+                logger.info("수동 태스크 실행 중 — 자동 동기화 건너뜀")
+                continue
 
-        logger.info("자동 동기화 실행: eclass 크롤링 + 정규화")
-        cmd = [PYTHON, "main.py", "--site", "eclass", "--download"]
-        started = await tasks.run_task("auto_sync", cmd)
+            logger.info("자동 동기화 실행: eclass 크롤링 + 정규화")
+            cmd = [PYTHON, "main.py", "--site", "eclass", "--download"]
+            started = await tasks.run_task("auto_sync", cmd)
 
-        if started:
-            while tasks.get_state().status == tasks.TaskStatus.RUNNING:
-                await asyncio.sleep(5)
-            _last_auto = datetime.now().isoformat(timespec="seconds")
-            state = tasks.get_state()
-            logger.info(f"자동 동기화 완료: {state.status.value} (exit={state.exit_code})")
+            if started:
+                while tasks.get_state().status == tasks.TaskStatus.RUNNING:
+                    await asyncio.sleep(5)
+                _last_auto = datetime.now().isoformat(timespec="seconds")
+                state = tasks.get_state()
+                logger.info(f"자동 동기화 완료: {state.status.value} (exit={state.exit_code})")
+        except asyncio.CancelledError:
+            logger.info("자동 동기화 루프 취소됨")
+            break
+        except Exception:
+            logger.exception("자동 동기화 루프 오류 — 다음 주기에 재시도")
+            await asyncio.sleep(60)

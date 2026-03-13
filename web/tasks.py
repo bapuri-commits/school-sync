@@ -134,16 +134,16 @@ async def run_chained_tasks(task_type: str, steps: list[dict]) -> bool:
     _state.logs.append("")
 
     async def _run():
-        for i, step in enumerate(steps, 1):
-            cmd = step["cmd"]
-            cwd = step.get("cwd", PROJECT_ROOT)
-            label = step.get("label", f"단계 {i}")
+        try:
+            for i, step in enumerate(steps, 1):
+                cmd = step["cmd"]
+                cwd = step.get("cwd", PROJECT_ROOT)
+                label = step.get("label", f"단계 {i}")
 
-            _state.logs.append(f"[StudyHub] [{i}/{len(steps)}] {label}")
-            _state.logs.append(f"[StudyHub] 명령: {' '.join(cmd)}")
-            _state.command = cmd
+                _state.logs.append(f"[StudyHub] [{i}/{len(steps)}] {label}")
+                _state.logs.append(f"[StudyHub] 명령: {' '.join(cmd)}")
+                _state.command = cmd
 
-            try:
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.PIPE,
@@ -155,31 +155,28 @@ async def run_chained_tasks(task_type: str, steps: list[dict]) -> bool:
                 if process.stdout:
                     await _read_stream(process.stdout, _state)
                 await process.wait()
+                _state._process = None
 
                 if process.returncode != 0:
                     _state.exit_code = process.returncode
                     _state.status = TaskStatus.FAILED
                     _state.logs.append(f"[StudyHub] {label} 실패 (exit={process.returncode})")
                     return
+
                 _state.logs.append(f"[StudyHub] {label} 완료")
                 _state.logs.append("")
-            except Exception as e:
-                _state.logs.append(f"[StudyHub] {label} 오류: {e}")
-                _state.status = TaskStatus.FAILED
-                _state.exit_code = -1
-                return
-            finally:
-                _state._process = None
 
-        _state.exit_code = 0
-        _state.status = TaskStatus.COMPLETED
-        _state.finished_at = datetime.now().isoformat(timespec="seconds")
-        _state.logs.append(f"[StudyHub] 태스크 종료: {_state.status.value}")
-
-    async def _wrapper():
-        await _run()
-        if not _state.finished_at:
+            _state.exit_code = 0
+            _state.status = TaskStatus.COMPLETED
+        except Exception as e:
+            _state.logs.append(f"[StudyHub] 오류: {e}")
+            _state.status = TaskStatus.FAILED
+            _state.exit_code = -1
+        finally:
             _state.finished_at = datetime.now().isoformat(timespec="seconds")
+            _state._process = None
+            _state.logs.append("")
+            _state.logs.append(f"[StudyHub] 태스크 종료: {_state.status.value} (exit={_state.exit_code})")
 
-    asyncio.create_task(_wrapper())
+    asyncio.create_task(_run())
     return True

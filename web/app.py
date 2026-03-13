@@ -10,7 +10,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -24,10 +26,25 @@ from .routes import health, dashboard, courses, data, ask, sync, me, lesson_assi
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", Path(__file__).resolve().parent.parent / "output"))
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    data_loader.init(OUTPUT_DIR)
+    from .auto_sync import auto_sync_loop
+    sync_task = asyncio.create_task(auto_sync_loop())
+    yield
+    sync_task.cancel()
+    try:
+        await sync_task
+    except asyncio.CancelledError:
+        pass
+
+
 app = FastAPI(
     title="StudyHub",
     description="school_sync + lesson-assist 통합 학습 도우미",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -37,14 +54,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-async def startup():
-    import asyncio
-    data_loader.init(OUTPUT_DIR)
-    from .auto_sync import auto_sync_loop
-    asyncio.create_task(auto_sync_loop())
 
 
 app.include_router(health.router, prefix="/api")

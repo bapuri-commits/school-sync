@@ -72,7 +72,7 @@ export default function LessonAssist() {
         const data = await r.json();
         const list: string[] = data.courses || [];
         setCourseList(list);
-        if (list.length > 0 && !uploadCourse) setUploadCourse(list[0]);
+        setUploadCourse((prev) => prev || list[0] || "");
       }
     } catch { /* ignore */ }
   }, []);
