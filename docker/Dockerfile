@@ -34,11 +34,7 @@ COPY . .
 # 프론트엔드 빌드 결과 복사
 COPY --from=frontend-build /build/dist/ ./web/frontend/dist/
 
-# 데이터 디렉토리 (볼륨 마운트 대상)
-RUN mkdir -p /data/output
-
 ENV PYTHONUNBUFFERED=1
-ENV OUTPUT_DIR=/data/output
 
 EXPOSE 8000
 

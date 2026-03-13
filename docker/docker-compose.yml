@@ -7,7 +7,7 @@ services:
     ports:
       - "8203:8000"
     volumes:
-      - ${DATA_DIR:-../data}/output:/data/output
+      - ${DATA_DIR:-../data}/output:/app/output
     env_file:
       - .env
     extra_hosts:
