@@ -112,29 +112,37 @@ class BrowserSession:
         print(f"[SESSION] nDRIMS SSO 로그인 시도: {base_url}")
         await self._page.goto(base_url, wait_until="networkidle", timeout=60000)
 
-        # nDRIMS CLX 로그인 (표준 form이 아닌 CLX 컴포넌트)
+        # nDRIMS CLX 로그인 — CLX는 fill()을 감지 못하므로 click+type 사용
         uid_el = await self._page.query_selector('input[type="text"]')
         pw_el = await self._page.query_selector('input[type="password"]')
 
         if uid_el and pw_el:
-            await uid_el.fill(username)
-            await pw_el.fill(password)
+            await uid_el.click()
+            await uid_el.fill("")
+            await self._page.keyboard.type(username, delay=50)
 
-            # CLX "로그인" 버튼 클릭 (표준 button이 아님 — 텍스트로 찾기)
+            await pw_el.click()
+            await pw_el.fill("")
+            await self._page.keyboard.type(password, delay=50)
+
+            await asyncio.sleep(0.5)
+
+            # CLX "로그인" 버튼: A.cl-text-wrapper > DIV.cl-text
             clicked = await self._page.evaluate("""
                 () => {
-                    const els = document.querySelectorAll('*');
+                    const els = document.querySelectorAll('.cl-text');
                     for (const el of els) {
-                        if (el.children.length === 0 && el.innerText && el.innerText.trim() === '로그인') {
-                            const target = el.closest('[class*="btn"]') || el.closest('[class*="login"]') || el.parentElement;
-                            if (target) { target.click(); return true; }
+                        if (el.innerText.trim() === '로그인') {
+                            const anchor = el.closest('a') || el.parentElement;
+                            if (anchor) { anchor.click(); return 'anchor'; }
                             el.click();
-                            return true;
+                            return 'direct';
                         }
                     }
                     return false;
                 }
             """)
+            print(f"[SESSION] 로그인 버튼 클릭: {clicked}")
 
             if not clicked:
                 await self._page.keyboard.press("Enter")
@@ -142,21 +150,26 @@ class BrowserSession:
             try:
                 await self._page.wait_for_load_state("networkidle", timeout=30000)
             except Exception:
-                await asyncio.sleep(5)
+                pass
+            await asyncio.sleep(3)
         elif "main.clx" in self._page.url:
             print(f"[SESSION] 이미 로그인된 상태입니다.")
         else:
             raise RuntimeError(f"nDRIMS SSO 로그인 실패 — 로그인 폼을 찾을 수 없습니다 ({self._page.url})")
 
-        # SSO 리다이렉트 대기 — main.clx 로드 확인
+        # SSO 리다이렉트 대기 — main.clx 또는 index.do 이외의 페이지 로드 확인
         for _ in range(30):
             await asyncio.sleep(1)
             url = self._page.url
-            if "main.clx" in url or ("ndrims" in url and "main" in url and "login" not in url.lower()):
+            if "main.clx" in url:
+                break
+            if "ndrims" in url and "index.do" not in url and "login" not in url.lower():
                 break
 
-        if "main.clx" not in self._page.url and "login" in self._page.url.lower():
-            raise RuntimeError(f"nDRIMS SSO 로그인 실패 — ID/PW를 확인해주세요. ({self._page.url})")
+        final_url = self._page.url
+        if "index.do" in final_url:
+            body = await self._page.evaluate("() => document.body?.innerText?.slice(0,100) || ''")
+            raise RuntimeError(f"nDRIMS SSO 로그인 실패 — ID/PW를 확인해주세요. (URL: {final_url}, body: {body[:50]})")
 
         cookies = await self._page.context.cookies()
         self.cookies_dict = {c["name"]: c["value"] for c in cookies}
