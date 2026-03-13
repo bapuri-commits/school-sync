@@ -61,6 +61,7 @@ export default function LessonAssist() {
   const [streaming, setStreaming] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [courseInfo, setCourseInfo] = useState<CourseInfo | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -73,27 +74,26 @@ export default function LessonAssist() {
         const list: string[] = data.courses || [];
         setCourseList(list);
         setUploadCourse((prev) => prev || list[0] || "");
+        setFetchError(null);
+      } else if (r.status === 401) {
+        setFetchError("인증이 필요합니다");
       }
-    } catch { /* ignore */ }
+    } catch {
+      setFetchError("서버에 연결할 수 없습니다");
+    }
   }, []);
 
   const fetchFiles = useCallback(async () => {
     try {
       const r = await fetch("/api/la/files");
-      if (r.ok) {
-        const data = await r.json();
-        setDagloFiles(data.courses || []);
-      }
-    } catch { /* ignore */ }
+      if (r.ok) setDagloFiles((await r.json()).courses || []);
+    } catch { /* ignore — fetchCourses handles connection errors */ }
   }, []);
 
   const fetchPackages = useCallback(async () => {
     try {
       const r = await fetch("/api/la/packages");
-      if (r.ok) {
-        const data = await r.json();
-        setPackages(data.packages || []);
-      }
+      if (r.ok) setPackages((await r.json()).packages || []);
     } catch { /* ignore */ }
   }, []);
 
@@ -106,15 +106,11 @@ export default function LessonAssist() {
         fetch("/api/sync/last-run"),
       ]);
       const materials = courseRes.ok ? (await courseRes.json()).materials || [] : [];
-      const hasContext = ctxRes.ok;
+      const hasContext = ctxRes.ok && ctxRes.status === 200;
       const runData = runRes.ok ? await runRes.json() : {};
-      setCourseInfo({
-        materials,
-        hasContext,
-        lastCrawl: runData.last_run || null,
-      });
+      setCourseInfo({ materials, hasContext, lastCrawl: runData.last_run || null });
     } catch {
-      setCourseInfo(null);
+      setCourseInfo({ materials: [], hasContext: false, lastCrawl: null });
     }
   }, []);
 
@@ -204,6 +200,17 @@ export default function LessonAssist() {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setStreaming(true);
+    const pending: string[] = [];
+    let flushTimer: ReturnType<typeof setInterval> | null = null;
+
+    const flush = () => {
+      if (pending.length > 0) {
+        const batch = pending.splice(0);
+        setLogs((prev) => [...prev, ...batch]);
+      }
+    };
+    flushTimer = setInterval(flush, 200);
+
     try {
       const res = await fetch("/api/sync/logs/stream", { signal: ctrl.signal });
       if (!res.body) { setStreaming(false); return; }
@@ -222,7 +229,7 @@ export default function LessonAssist() {
           try {
             const chunk: SSEChunk = JSON.parse(line.slice(6));
             if (chunk.type === "log") {
-              setLogs((prev) => [...prev, chunk.text]);
+              pending.push(chunk.text);
             } else if (chunk.type === "status") {
               setTaskStatus((prev) =>
                 prev ? { ...prev, status: chunk.status as TaskStatus["status"], exit_code: chunk.exit_code } : prev
@@ -233,6 +240,9 @@ export default function LessonAssist() {
       }
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
+    } finally {
+      if (flushTimer) clearInterval(flushTimer);
+      flush();
     }
     setStreaming(false);
     fetchPackages();
@@ -265,6 +275,12 @@ export default function LessonAssist() {
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-bold">Lesson Assist</h1>
+
+      {fetchError && (
+        <div className="px-4 py-2 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm">
+          {fetchError}
+        </div>
+      )}
 
       {/* 파일 업로드 */}
       <section className="bg-[var(--color-surface)] rounded-lg p-5 border border-[var(--color-border)]">

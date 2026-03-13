@@ -41,6 +41,17 @@ async def get_auto_status(user: dict = Depends(require_permission("sync"))):
     return get_auto_sync_status()
 
 
+class AutoSyncToggle(BaseModel):
+    enabled: bool
+
+
+@router.post("/auto-toggle")
+async def toggle_auto_sync(body: AutoSyncToggle, user: dict = Depends(require_permission("sync"))):
+    from ..auto_sync import set_enabled
+    set_enabled(body.enabled)
+    return {"enabled": body.enabled}
+
+
 @router.get("/last-run")
 async def get_last_run(user: dict = Depends(require_permission("sync"))):
     return data_loader.last_run() or {"last_run": None}

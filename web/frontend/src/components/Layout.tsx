@@ -37,7 +37,7 @@ const NAV_GROUPS: NavGroup[] = [
 ];
 
 function isActive(pathname: string, to: string): boolean {
-  if (to === "/") return pathname === "/";
+  if (to === "/") return pathname === "/" || pathname.startsWith("/courses/");
   return pathname.startsWith(to);
 }
 

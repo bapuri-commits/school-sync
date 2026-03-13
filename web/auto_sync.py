@@ -21,7 +21,7 @@ PYTHON = sys.executable
 
 _last_auto: str | None = None
 _next_auto: str | None = None
-_enabled = True
+_enabled = os.getenv("AUTO_SYNC_ENABLED", "1") == "1"
 
 
 def get_auto_sync_status() -> dict:
@@ -31,6 +31,12 @@ def get_auto_sync_status() -> dict:
         "last_auto": _last_auto,
         "next_auto": _next_auto,
     }
+
+
+def set_enabled(enabled: bool) -> None:
+    global _enabled
+    _enabled = enabled
+    logger.info(f"자동 동기화 {'활성화' if enabled else '비활성화'}")
 
 
 async def auto_sync_loop():

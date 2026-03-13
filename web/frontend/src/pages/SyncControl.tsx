@@ -54,9 +54,21 @@ export default function SyncControl() {
 
   const startLogStream = async () => {
     setStreaming(true);
+    const pending: string[] = [];
+    let flushTimer: ReturnType<typeof setInterval> | null = null;
+
+    const flush = () => {
+      if (pending.length > 0) {
+        const batch = pending.splice(0);
+        setLogs((prev) => [...prev, ...batch]);
+      }
+    };
+    flushTimer = setInterval(flush, 200);
+
     try {
       const res = await fetch("/api/sync/logs/stream");
-      const reader = res.body!.getReader();
+      if (!res.body) { setStreaming(false); return; }
+      const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
 
@@ -71,7 +83,7 @@ export default function SyncControl() {
           try {
             const chunk: SSEChunk = JSON.parse(line.slice(6));
             if (chunk.type === "log") {
-              setLogs((prev) => [...prev, chunk.text]);
+              pending.push(chunk.text);
             } else if (chunk.type === "status") {
               setTaskStatus((prev) => prev ? { ...prev, status: chunk.status as TaskStatus["status"], exit_code: chunk.exit_code } : prev);
             }
@@ -79,6 +91,10 @@ export default function SyncControl() {
         }
       }
     } catch { /* ignore */ }
+    finally {
+      if (flushTimer) clearInterval(flushTimer);
+      flush();
+    }
     setStreaming(false);
     fetchStatus();
     fetchLastRun();
