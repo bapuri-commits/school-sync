@@ -112,30 +112,31 @@ class BrowserSession:
         print(f"[SESSION] nDRIMS SSO 로그인 시도: {base_url}")
         await self._page.goto(base_url, wait_until="networkidle", timeout=60000)
 
-        # SSO 로그인 폼 자동 입력 (nDRIMS는 name/id 없는 input 사용)
-        uid_selectors = ['input[name="username"]', 'input[name="userId"]', '#username', '#userId', 'input[type="text"]']
-        pw_selectors = ['input[name="password"]', 'input[name="pw"]', '#password', '#pw', 'input[type="password"]']
-
-        uid_el, pw_el = None, None
-        for sel in uid_selectors:
-            uid_el = await self._page.query_selector(sel)
-            if uid_el:
-                break
-        for sel in pw_selectors:
-            pw_el = await self._page.query_selector(sel)
-            if pw_el:
-                break
+        # nDRIMS CLX 로그인 (표준 form이 아닌 CLX 컴포넌트)
+        uid_el = await self._page.query_selector('input[type="text"]')
+        pw_el = await self._page.query_selector('input[type="password"]')
 
         if uid_el and pw_el:
             await uid_el.fill(username)
             await pw_el.fill(password)
 
-            submit = await self._page.query_selector(
-                'button[type="submit"], input[type="submit"], .btn_login, .login_btn, #loginBtn, a.btn'
-            )
-            if submit:
-                await submit.click()
-            else:
+            # CLX "로그인" 버튼 클릭 (표준 button이 아님 — 텍스트로 찾기)
+            clicked = await self._page.evaluate("""
+                () => {
+                    const els = document.querySelectorAll('*');
+                    for (const el of els) {
+                        if (el.children.length === 0 && el.innerText && el.innerText.trim() === '로그인') {
+                            const target = el.closest('[class*="btn"]') || el.closest('[class*="login"]') || el.parentElement;
+                            if (target) { target.click(); return true; }
+                            el.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            """)
+
+            if not clicked:
                 await self._page.keyboard.press("Enter")
 
             try:
