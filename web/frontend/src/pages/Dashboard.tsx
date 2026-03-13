@@ -18,14 +18,8 @@ function DdayBadge({ dDay }: { dDay: number }) {
   );
 }
 
-function StatusDot({ status }: { status: string }) {
-  const color =
-    status === "결석"
-      ? "bg-red-400"
-      : status === "지각" || status === "조퇴"
-        ? "bg-amber-400"
-        : "bg-emerald-400";
-  return <span className={`inline-block w-2 h-2 rounded-full ${color}`} />;
+function NewBadge() {
+  return <span className="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse" />;
 }
 
 export default function Dashboard() {
@@ -127,7 +121,7 @@ export default function Dashboard() {
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {courses.map((c) => {
-            const hasAttentionFlag = data.attendance_attention.includes(c.short_name);
+            const hasNewNotice = data.new_notice_courses.includes(c.short_name);
             return (
               <Link
                 key={c.id}
@@ -138,7 +132,7 @@ export default function Dashboard() {
                   <h3 className="font-semibold text-sm group-hover:text-[var(--color-primary)] transition-colors">
                     {c.short_name}
                   </h3>
-                  {hasAttentionFlag && <StatusDot status="결석" />}
+                  {hasNewNotice && <NewBadge />}
                 </div>
                 <p className="text-xs text-[var(--color-text-muted)] mt-1">
                   {c.professor}

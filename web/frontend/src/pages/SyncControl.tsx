@@ -14,11 +14,19 @@ type SSEChunk =
   | { type: "status"; status: string; exit_code: number | null }
   | { type: "done" };
 
+interface AutoSyncStatus {
+  enabled: boolean;
+  interval_hours: number;
+  last_auto: string | null;
+  next_auto: string | null;
+}
+
 export default function SyncControl() {
   const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [lastRun, setLastRun] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
+  const [autoSync, setAutoSync] = useState<AutoSyncStatus | null>(null);
 
   const [crawlSites, setCrawlSites] = useState<Set<string>>(new Set(["eclass"]));
   const [crawlDownload, setCrawlDownload] = useState(false);
@@ -26,9 +34,29 @@ export default function SyncControl() {
 
   const logEndRef = useRef<HTMLDivElement>(null);
 
+  const fetchAutoSync = async () => {
+    try {
+      const r = await fetch("/api/sync/auto-status");
+      if (r.ok) setAutoSync(await r.json());
+    } catch { /* ignore */ }
+  };
+
+  const toggleAutoSync = async () => {
+    if (!autoSync) return;
+    try {
+      const r = await fetch("/api/sync/auto-toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !autoSync.enabled }),
+      });
+      if (r.ok) fetchAutoSync();
+    } catch { /* ignore */ }
+  };
+
   useEffect(() => {
     fetchStatus();
     fetchLastRun();
+    fetchAutoSync();
   }, []);
 
   useEffect(() => {
@@ -140,6 +168,33 @@ export default function SyncControl() {
           <p className="text-sm text-[var(--color-text-muted)]">마지막 크롤링: {lastRun}</p>
         )}
       </div>
+
+      {/* 자동 동기화 상태 */}
+      {autoSync && (
+        <section className="flex items-center justify-between bg-[var(--color-surface)] rounded-lg px-4 py-3 border border-[var(--color-border)]">
+          <div className="flex items-center gap-3">
+            <span className={`inline-block w-2 h-2 rounded-full ${autoSync.enabled ? "bg-emerald-400" : "bg-[var(--color-text-muted)]"}`} />
+            <div>
+              <span className="text-sm font-medium">자동 동기화</span>
+              <span className="text-xs text-[var(--color-text-muted)] ml-2">
+                {autoSync.enabled ? `${autoSync.interval_hours}시간 간격` : "비활성"}
+                {autoSync.enabled && autoSync.next_auto && ` · 다음: ${new Date(autoSync.next_auto).toLocaleString("ko-KR")}`}
+                {autoSync.last_auto && ` · 마지막: ${new Date(autoSync.last_auto).toLocaleString("ko-KR")}`}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={toggleAutoSync}
+            className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+              autoSync.enabled
+                ? "bg-[var(--color-text-muted)]/20 text-[var(--color-text-muted)] hover:bg-red-500/20 hover:text-red-400"
+                : "bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30"
+            }`}
+          >
+            {autoSync.enabled ? "끄기" : "켜기"}
+          </button>
+        </section>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* 크롤링 패널 */}

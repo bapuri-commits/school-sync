@@ -94,41 +94,74 @@ class BrowserSession:
         print(f"[SESSION] eClass 로그인 성공: {self._page.url}")
 
     # ------------------------------------------------------------------
-    #  SSO 로그인 (nDRIMS 등 — Phase 2+)
+    #  SSO 로그인 (nDRIMS 등)
     # ------------------------------------------------------------------
     async def login_ndrims(self, username: str = "", password: str = ""):
-        """nDRIMS SSO 로그인. 브라우저를 열고 수동 로그인을 기다린다."""
+        """nDRIMS SSO 로그인. headless 자동 로그인을 시도한다."""
+        username = username or SCHOOL_USERNAME
+        password = password or SCHOOL_PASSWORD
+
+        if not username or not password:
+            raise RuntimeError(".env에 SCHOOL_USERNAME/SCHOOL_PASSWORD를 입력해주세요.")
+
         ndrims_cfg = SITES.get("ndrims", {})
         base_url = ndrims_cfg.get("base_url", "https://ndrims.dongguk.edu")
 
-        print(f"[SESSION] nDRIMS 브라우저를 엽니다: {base_url}")
-        print(f"[SESSION] SSO 로그인을 완료해주세요.")
-
-        # confirm 팝업 자동 수락
         self._page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
 
+        print(f"[SESSION] nDRIMS SSO 로그인 시도: {base_url}")
         await self._page.goto(base_url, wait_until="networkidle", timeout=60000)
 
-        # 로그인 완료 대기: main.clx가 로드될 때까지
-        for _ in range(120):
+        # SSO 로그인 폼 자동 입력
+        sso_selectors = [
+            ('input[name="username"], input[name="userId"], input[name="id"], #username, #userId', 'input[name="password"], input[name="pw"], #password, #pw'),
+        ]
+
+        logged_in = False
+        for uid_sel, pw_sel in sso_selectors:
+            try:
+                uid_el = await self._page.query_selector(uid_sel)
+                pw_el = await self._page.query_selector(pw_sel)
+                if uid_el and pw_el:
+                    await uid_el.fill(username)
+                    await pw_el.fill(password)
+
+                    submit = await self._page.query_selector(
+                        'button[type="submit"], input[type="submit"], .btn_login, .login_btn, #loginBtn'
+                    )
+                    if submit:
+                        await submit.click()
+                    else:
+                        await self._page.keyboard.press("Enter")
+
+                    await self._page.wait_for_load_state("networkidle", timeout=30000)
+                    logged_in = True
+                    break
+            except Exception as e:
+                print(f"[SESSION] SSO 폼 시도 실패: {e}")
+
+        if not logged_in:
+            print(f"[SESSION] SSO 로그인 폼을 찾지 못했습니다. 현재 URL: {self._page.url}")
+            content = await self._page.content()
+            if "main.clx" in self._page.url:
+                print(f"[SESSION] 이미 로그인된 상태입니다.")
+            else:
+                raise RuntimeError(f"nDRIMS SSO 로그인 실패 — 로그인 폼을 찾을 수 없습니다 ({self._page.url})")
+
+        # SSO 리다이렉트 대기 — main.clx 로드 확인
+        for _ in range(30):
             await asyncio.sleep(1)
             url = self._page.url
-            if "main.clx" in url or ("main" in url and "index" not in url):
+            if "main.clx" in url or ("ndrims" in url and "main" in url and "login" not in url.lower()):
                 break
 
-        if "main.clx" in self._page.url:
-            self._logged_in = True
-            cookies = await self._page.context.cookies()
-            self.cookies_dict = {c["name"]: c["value"] for c in cookies}
-            print(f"[SESSION] nDRIMS 로그인 성공: {self._page.url}")
-        else:
-            print(f"[SESSION] nDRIMS 로그인 대기 중... 브라우저에서 로그인을 완료해주세요.")
-            input(">>> 로그인 완료 후 Enter를 누르세요... ")
-            await asyncio.sleep(2)
-            cookies = await self._page.context.cookies()
-            self.cookies_dict = {c["name"]: c["value"] for c in cookies}
-            self._logged_in = True
-            print(f"[SESSION] nDRIMS 세션 확보: {self._page.url}")
+        if "main.clx" not in self._page.url and "login" in self._page.url.lower():
+            raise RuntimeError(f"nDRIMS SSO 로그인 실패 — ID/PW를 확인해주세요. ({self._page.url})")
+
+        cookies = await self._page.context.cookies()
+        self.cookies_dict = {c["name"]: c["value"] for c in cookies}
+        self._logged_in = True
+        print(f"[SESSION] nDRIMS 로그인 성공: {self._page.url}")
 
     async def login_sso(self, site_name: str):
         if site_name == "ndrims":
@@ -173,14 +206,11 @@ class BrowserSession:
 async def create_session(headless: bool = True, site: str = "eclass") -> BrowserSession:
     """브라우저 세션을 생성하고, 필요한 사이트에 로그인한다."""
     session = BrowserSession()
+    await session.start(headless=headless)
 
-    if site == "ndrims":
-        await session.start(headless=False)
-        await session.login_ndrims()
-    elif site == "eclass":
-        await session.start(headless=headless)
+    if site == "eclass":
         await session.login_eclass()
-    else:
-        await session.start(headless=headless)
+    elif site == "ndrims":
+        await session.login_ndrims()
 
     return session

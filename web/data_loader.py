@@ -7,7 +7,7 @@ school_sync가 생성한 output/normalized/ 디렉토리의 JSON/MD 파일을
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -162,11 +162,11 @@ def dashboard_summary() -> dict:
         reverse=True,
     )[:10]
 
-    att = attendance()
-    attention_courses = set()
-    for a in att:
-        if a.get("status") in ("결석", "지각", "조퇴"):
-            attention_courses.add(a.get("course_name", ""))
+    cutoff = (date.today() - timedelta(days=2)).isoformat()
+    new_notice_courses = set()
+    for n in all_notices:
+        if n.get("date", "") >= cutoff:
+            new_notice_courses.add(n.get("course_name", ""))
 
     return {
         "today": today_str,
@@ -174,6 +174,6 @@ def dashboard_summary() -> dict:
         "today_classes": today_classes,
         "upcoming_deadlines": upcoming,
         "recent_notices": recent_notices,
-        "attendance_attention": sorted(attention_courses),
+        "new_notice_courses": sorted(new_notice_courses),
         "last_run": last_run(),
     }

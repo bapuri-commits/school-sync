@@ -59,8 +59,8 @@ async def auto_sync_loop():
                 logger.info("수동 태스크 실행 중 — 자동 동기화 건너뜀")
                 continue
 
-            logger.info("자동 동기화 실행: eclass 크롤링 + 정규화")
-            cmd = [PYTHON, "main.py", "--site", "eclass", "--download"]
+            logger.info("자동 동기화 실행: eclass + portal + department 크롤링")
+            cmd = [PYTHON, "main.py", "--site", "eclass", "portal", "department", "--download"]
             started = await tasks.run_task("auto_sync", cmd)
 
             if started:
