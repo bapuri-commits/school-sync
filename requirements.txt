@@ -1,6 +1,9 @@
 anthropic
+fastapi
 httpx
 playwright
 pydantic
+PyJWT
 python-dotenv
 pyyaml
+uvicorn[standard]

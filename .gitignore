@@ -5,3 +5,6 @@ __pycache__/
 .session.json
 .venv/
 *.egg-info/
+web/frontend/node_modules/
+web/frontend/dist/
+docker/.env

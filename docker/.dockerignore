@@ -1,0 +1,13 @@
+.git
+__pycache__
+*.pyc
+output/
+data/
+docker/
+deploy/
+docs/
+.env
+.env.*
+web/frontend/node_modules/
+web/frontend/dist/
+web/test_*.py

@@ -1,0 +1,26 @@
+# StudyHub 유저별 권한 설정
+#
+# admin role은 자동으로 전체 권한 (여기에 안 써도 됨)
+# user role은 username별로 허용할 권한을 명시
+# 목록에 없는 user는 StudyHub 접근 자체가 차단됨 (403)
+#
+# 사용 가능한 권한:
+#   dashboard  - 대시보드 (시간표, 마감, 공지 요약)
+#   courses    - 과목 상세 (강의계획서, 주차계획)
+#   grades     - 성적/출석 열람
+#   materials  - 수업자료 목록
+#   notices    - 공지사항 열람
+#   ask        - AI Q&A (API 비용 발생)
+#   sync       - 크롤링/패키징 트리거
+
+users: {}
+  # 예시:
+  # friend1:
+  #   - dashboard
+  #   - courses
+  #   - notices
+  # friend2:
+  #   - dashboard
+  #   - courses
+  #   - notices
+  #   - ask
