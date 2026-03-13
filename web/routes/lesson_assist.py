@@ -38,7 +38,7 @@ def _validate_name(name: str, label: str) -> str:
 def _ensure_under(path: Path, base: Path) -> Path:
     """resolved path가 base 아래에 있는지 검증한다."""
     resolved = path.resolve()
-    if not str(resolved).startswith(str(base.resolve())):
+    if not resolved.is_relative_to(base.resolve()):
         raise HTTPException(400, "잘못된 경로")
     return resolved
 
@@ -85,6 +85,10 @@ async def upload_daglo(
         course = detected
 
     course = _validate_name(course, "과목명")
+
+    known = {c.get("short_name", "") for c in data_loader.courses()}
+    if known and course not in known:
+        raise HTTPException(400, f"등록되지 않은 과목: {course}")
 
     if date:
         if not _DATE_RE.match(date):
@@ -189,7 +193,8 @@ async def list_packages(user: dict = Depends(require_permission("sync"))):
                 for entry in json.loads(manifest_path.read_text(encoding="utf-8")):
                     manifest[entry["filename"]] = entry
             except Exception:
-                pass
+                import logging
+                logging.getLogger("studyhub.la").warning(f"매니페스트 읽기 실패: {manifest_path}")
 
         files = []
         for f in sorted(d.iterdir()):

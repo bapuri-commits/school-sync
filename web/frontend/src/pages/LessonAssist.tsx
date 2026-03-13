@@ -98,7 +98,7 @@ export default function LessonAssist() {
   }, []);
 
   const fetchCourseInfo = useCallback(async (course: string) => {
-    if (!course) { setCourseInfo(null); return; }
+    if (!course || course === "auto") { setCourseInfo(null); return; }
     try {
       const [courseRes, ctxRes, runRes] = await Promise.all([
         fetch(`/api/courses/${encodeURIComponent(course)}`),
