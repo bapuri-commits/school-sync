@@ -287,7 +287,7 @@ export default function SyncControl() {
       </div>
 
       {/* 상태 바 */}
-      {taskStatus && taskStatus.status !== "idle" && (
+      {taskStatus && taskStatus.status !== "idle" && taskStatus.task_type && (
         <div
           className={`flex items-center gap-3 px-4 py-2 rounded-lg border text-sm ${
             taskStatus.status === "running"
