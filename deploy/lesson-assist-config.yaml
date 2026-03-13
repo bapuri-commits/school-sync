@@ -1,0 +1,39 @@
+# lesson-assist VPS 설정 (Docker 컨테이너 내부 경로 기준)
+
+school_sync:
+  root: "/app"
+  context_dir: "output/context"
+  downloads_dir: "output/downloads"
+
+daglo:
+  input_dir: "/data/lesson-assist/input/daglo"
+
+notebooklm:
+  output_dir: "/data/lesson-assist/output/notebooklm"
+  auto_open: false
+
+from_notebooklm:
+  input_dir: "/data/lesson-assist/input/from_notebooklm"
+
+obsidian:
+  vault_path: ""
+  lecture_dir: ""
+  daily_dir: ""
+
+courses:
+  머신러닝:
+    sync_name: "머신러닝"
+  데이터베이스:
+    sync_name: "데이터베이스"
+  자료구조:
+    sync_name: "자료구조"
+  객체지향설계와패턴:
+    sync_name: "객체지향설계와패턴"
+  객체지향:
+    sync_name: "객체지향설계와패턴"
+  이산수학:
+    sync_name: "이산수학"
+  공학선형대수학:
+    sync_name: "공학선형대수학"
+  선형대수:
+    sync_name: "공학선형대수학"
