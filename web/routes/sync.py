@@ -120,14 +120,14 @@ async def trigger_pack(body: PackRequest, user: dict = Depends(require_permissio
     steps.append({"cmd": ctx_cmd, "label": "컨텍스트 갱신"})
 
     pack_cmd = [PYTHON, "-m", "lesson_assist"]
-    if la_config.exists():
-        pack_cmd.extend(["--config", str(la_config)])
     if body.all_courses:
         pack_cmd.extend(["pack", "--all", "--no-open", "--no-sync"])
     elif body.course:
         pack_cmd.extend(["pack", "--course", body.course, "--no-open", "--no-sync"])
     else:
         pack_cmd.extend(["run", "--no-open", "--no-sync"])
+    if la_config.exists():
+        pack_cmd.extend(["--config", str(la_config)])
     steps.append({"cmd": pack_cmd, "cwd": la_dir / "src", "label": "패키징"})
 
     started = await tasks.run_chained_tasks("pack", steps)
