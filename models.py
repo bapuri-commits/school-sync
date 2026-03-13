@@ -65,8 +65,10 @@ class Notice(BaseModel):
     author: str = ""
     date: str = ""
     url: str = ""
-    category: str = ""              # 포탈 공지 카테고리 ("수업/성적", "등록" 등)
+    category: str = ""
     source_site: str = "eclass"
+    body: str = ""
+    attachments: list[dict] = []
 
 
 class AttendanceRecord(BaseModel):

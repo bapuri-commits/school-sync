@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -49,6 +50,20 @@ async def list_course_names(user: dict = Depends(require_permission("sync"))):
     return {"courses": [c.get("short_name", "") for c in courses if c.get("short_name")]}
 
 
+def _detect_course(filename: str) -> str | None:
+    """파일명에서 과목명을 자동 감지한다 (inbox.py 로직 재사용)."""
+    stem = Path(filename).stem
+    courses = data_loader.courses()
+    known = sorted(
+        [c.get("short_name", "") for c in courses if c.get("short_name")],
+        key=len, reverse=True,
+    )
+    for name in known:
+        if name in stem:
+            return name
+    return None
+
+
 @router.post("/upload")
 async def upload_daglo(
     file: UploadFile = File(...),
@@ -57,11 +72,19 @@ async def upload_daglo(
     user: dict = Depends(require_permission("sync")),
 ):
     """Daglo SRT/TXT 파일을 업로드한다."""
-    course = _validate_name(course, "과목명")
-
     ext = Path(file.filename or "").suffix.lower()
     if ext not in (".srt", ".txt"):
         raise HTTPException(400, "SRT 또는 TXT 파일만 업로드 가능합니다")
+
+    if course == "auto":
+        detected = _detect_course(file.filename or "")
+        if not detected:
+            courses = data_loader.courses()
+            names = [c.get("short_name", "") for c in courses if c.get("short_name")]
+            return {"status": "needs_course", "filename": file.filename, "courses": names}
+        course = detected
+
+    course = _validate_name(course, "과목명")
 
     if date:
         if not _DATE_RE.match(date):
@@ -158,15 +181,28 @@ async def list_packages(user: dict = Depends(require_permission("sync"))):
     for d in sorted(PACKAGES_DIR.iterdir()):
         if not d.is_dir() or d.name.startswith("."):
             continue
+
+        manifest: dict[str, dict] = {}
+        manifest_path = d / ".pack_manifest.json"
+        if manifest_path.exists():
+            try:
+                for entry in json.loads(manifest_path.read_text(encoding="utf-8")):
+                    manifest[entry["filename"]] = entry
+            except Exception:
+                pass
+
         files = []
         for f in sorted(d.iterdir()):
-            if not f.is_file():
+            if not f.is_file() or f.name.startswith("."):
                 continue
             try:
                 size = f.stat().st_size
             except OSError:
                 continue
-            files.append({"filename": f.name, "size": size})
+            info: dict = {"filename": f.name, "size": size}
+            if f.name in manifest:
+                info["changed"] = manifest[f.name].get("changed")
+            files.append(info)
         if files:
             packages.append({"course": d.name, "files": files})
 

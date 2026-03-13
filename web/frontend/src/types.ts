@@ -23,6 +23,8 @@ export interface Notice {
   date: string;
   url: string;
   source_site: string;
+  body?: string;
+  attachments?: { name: string; url: string }[];
 }
 
 export interface AttendanceRecord {

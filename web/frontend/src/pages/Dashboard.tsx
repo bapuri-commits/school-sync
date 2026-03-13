@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import type { Course, DashboardData } from "../types";
+import type { Course, DashboardData, Notice } from "../types";
 
 function DdayBadge({ dDay }: { dDay: number }) {
   const color =
@@ -144,31 +144,59 @@ export default function Dashboard() {
       </section>
 
       {/* 최근 공지 */}
-      <section className="bg-[var(--color-surface)] rounded-lg p-4 border border-[var(--color-border)]">
-        <h2 className="text-sm font-semibold text-[var(--color-text-muted)] mb-3">
-          최근 공지
-        </h2>
-        <ul className="divide-y divide-[var(--color-border)]">
-          {data.recent_notices.slice(0, 8).map((n, i) => (
-            <li key={i} className="py-2 flex items-start gap-3 text-sm">
-              <span className="text-[var(--color-text-muted)] text-xs shrink-0 w-20">
-                {n.date}
-              </span>
+      <NoticeSection notices={data.recent_notices.slice(0, 8)} />
+    </div>
+  );
+}
+
+function NoticeSection({ notices }: { notices: Notice[] }) {
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  return (
+    <section className="bg-[var(--color-surface)] rounded-lg p-4 border border-[var(--color-border)]">
+      <h2 className="text-sm font-semibold text-[var(--color-text-muted)] mb-3">최근 공지</h2>
+      <ul className="divide-y divide-[var(--color-border)]">
+        {notices.map((n, i) => (
+          <li key={i} className="py-2">
+            <div
+              className="flex items-start gap-3 text-sm cursor-pointer hover:text-[var(--color-primary)] transition-colors"
+              onClick={() => setExpanded(expanded === i ? null : i)}
+            >
+              <span className="text-[var(--color-text-muted)] text-xs shrink-0 w-20">{n.date}</span>
               <span className="px-1.5 py-0.5 rounded bg-[var(--color-surface-hover)] text-xs text-[var(--color-text-muted)] shrink-0">
                 {n.course_name}
               </span>
-              <a
-                href={n.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 truncate hover:text-[var(--color-primary)] transition-colors"
-              >
-                {n.title}
-              </a>
-            </li>
-          ))}
-        </ul>
-      </section>
-    </div>
+              <span className="flex-1 truncate">{n.title}</span>
+              <span className="text-[var(--color-text-muted)] text-xs shrink-0">
+                {n.body ? (expanded === i ? "접기" : "펼치기") : ""}
+              </span>
+            </div>
+            {expanded === i && n.body && (
+              <div className="mt-2 ml-24 text-xs text-[var(--color-text-muted)] whitespace-pre-wrap bg-[var(--color-bg)] rounded p-3 border border-[var(--color-border)]">
+                {n.body}
+                {n.attachments && n.attachments.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-[var(--color-border)]">
+                    <span className="font-medium">첨부: </span>
+                    {n.attachments.map((a, j) => (
+                      <a key={j} href={a.url} target="_blank" rel="noopener noreferrer" className="text-[var(--color-primary)] hover:underline mr-2">
+                        {a.name}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {expanded === i && !n.body && (
+              <div className="mt-2 ml-24 text-xs text-[var(--color-text-muted)]">
+                본문 없음 —{" "}
+                <a href={n.url} target="_blank" rel="noopener noreferrer" className="text-[var(--color-primary)] hover:underline">
+                  eClass에서 보기
+                </a>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

@@ -14,6 +14,7 @@ interface DagloCourse {
 interface PackageFile {
   filename: string;
   size: number;
+  changed?: boolean | null;
 }
 
 interface PackageCourse {
@@ -54,7 +55,7 @@ export default function LessonAssist() {
   const [dagloFiles, setDagloFiles] = useState<DagloCourse[]>([]);
   const [packages, setPackages] = useState<PackageCourse[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [uploadCourse, setUploadCourse] = useState("");
+  const [uploadCourse, setUploadCourse] = useState("auto");
   const [uploadDate, setUploadDate] = useState("");
   const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -73,7 +74,6 @@ export default function LessonAssist() {
         const data = await r.json();
         const list: string[] = data.courses || [];
         setCourseList(list);
-        setUploadCourse((prev) => prev || list[0] || "");
         setFetchError(null);
       } else if (r.status === 401) {
         setFetchError("인증이 필요합니다");
@@ -161,14 +161,22 @@ export default function LessonAssist() {
         if (uploadDate) formData.append("date", uploadDate);
 
         const r = await fetch("/api/la/upload", { method: "POST", body: formData });
-        if (!r.ok) {
-          try {
-            const err = await r.json();
-            const msg = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail);
-            alert(`업로드 실패: ${msg}`);
-          } catch {
-            alert(`업로드 실패: HTTP ${r.status}`);
+        const result = await r.json();
+        if (result.status === "needs_course") {
+          const picked = prompt(
+            `"${result.filename}" 과목을 감지할 수 없습니다.\n과목명을 입력하세요:\n(${(result.courses || []).join(", ")})`,
+          );
+          if (picked) {
+            const retry = new FormData();
+            retry.append("file", file);
+            retry.append("course", picked);
+            if (uploadDate) retry.append("date", uploadDate);
+            const r2 = await fetch("/api/la/upload", { method: "POST", body: retry });
+            if (!r2.ok) alert(`업로드 실패: HTTP ${r2.status}`);
           }
+        } else if (!r.ok) {
+          const msg = typeof result.detail === "string" ? result.detail : JSON.stringify(result.detail || result);
+          alert(`업로드 실패: ${msg}`);
         }
       }
       fetchFiles();
@@ -269,6 +277,18 @@ export default function LessonAssist() {
     }
   };
 
+  const downloadAll = async (course: string, files: PackageFile[]) => {
+    for (const f of files) {
+      const a = document.createElement("a");
+      a.href = `/api/la/packages/${encodeURIComponent(course)}/${encodeURIComponent(f.filename)}`;
+      a.download = f.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  };
+
   const isRunning = taskStatus?.status === "running" || streaming;
   const totalFiles = dagloFiles.reduce((acc, c) => acc + c.files.length, 0);
 
@@ -293,13 +313,10 @@ export default function LessonAssist() {
               onChange={(e) => setUploadCourse(e.target.value)}
               className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--color-primary)]"
             >
-              {courseList.length === 0 ? (
-                <option value="">과목 로딩 중...</option>
-              ) : (
-                courseList.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))
-              )}
+              <option value="auto">자동 감지</option>
+              {courseList.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
             </select>
           </div>
           <div>
@@ -440,13 +457,23 @@ export default function LessonAssist() {
             ) : (
               packages.map((p) => (
                 <div key={p.course} className="p-3">
-                  <span className="text-sm font-medium block mb-2">{p.course}</span>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium">{p.course}</span>
+                    <button
+                      onClick={() => downloadAll(p.course, p.files)}
+                      className="text-xs text-[var(--color-primary)] hover:underline"
+                    >
+                      전체 다운로드
+                    </button>
+                  </div>
                   <div className="space-y-1">
                     {p.files.map((f) => (
                       <div key={f.filename} className="flex items-center justify-between text-xs">
-                        <span className="text-[var(--color-text-muted)]">
+                        <span className={f.changed === false ? "text-[var(--color-text-muted)] opacity-50" : "text-[var(--color-text-muted)]"}>
                           {f.filename}
                           <span className="ml-1.5 opacity-60">{formatSize(f.size)}</span>
+                          {f.changed === true && <span className="ml-1.5 text-blue-400 text-[10px]">변경됨</span>}
+                          {f.changed === false && <span className="ml-1.5 text-[var(--color-text-muted)] text-[10px]">동일</span>}
                         </span>
                         <a
                           href={`/api/la/packages/${encodeURIComponent(p.course)}/${encodeURIComponent(f.filename)}`}

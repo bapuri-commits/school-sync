@@ -200,6 +200,8 @@ def normalize_notices(raw: dict, courses: list[Course]) -> list[Notice]:
                         url=post.get("_link", ""),
                         category=board_name,
                         source_site="eclass",
+                        body=post.get("_body", ""),
+                        attachments=post.get("_attachments", []),
                     ))
     return results
 
