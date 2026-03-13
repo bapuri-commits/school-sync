@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import type { Permission } from "../types";
@@ -45,7 +45,6 @@ function getGroupForPath(pathname: string): string {
   for (const g of NAV_GROUPS) {
     if (g.items.some((i) => isActive(pathname, i.to))) return g.id;
   }
-  if (pathname.startsWith("/courses/")) return "school-sync";
   return "school-sync";
 }
 
@@ -56,19 +55,10 @@ export default function Layout() {
 
   useEffect(() => { setSidebarOpen(false); }, [pathname]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-[var(--color-text-muted)]">인증 확인 중...</p>
-      </div>
-    );
-  }
-
-  const redirectUrl = useRef("");
   useEffect(() => {
     if ((error || !user) && !loading) {
-      redirectUrl.current = `${SYOPS_LOGIN}?redirect=${encodeURIComponent(window.location.href)}`;
-      const t = setTimeout(() => { window.location.href = redirectUrl.current; }, 1500);
+      const url = `${SYOPS_LOGIN}?redirect=${encodeURIComponent(window.location.href)}`;
+      const t = setTimeout(() => { window.location.href = url; }, 1500);
       return () => clearTimeout(t);
     }
   }, [error, user, loading]);
@@ -79,6 +69,14 @@ export default function Layout() {
       return () => { document.body.style.overflow = ""; };
     }
   }, [sidebarOpen]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-[var(--color-text-muted)]">인증 확인 중...</p>
+      </div>
+    );
+  }
 
   if (error || !user) {
     const redirect = `${SYOPS_LOGIN}?redirect=${encodeURIComponent(window.location.href)}`;
@@ -101,7 +99,6 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Header */}
       <header className="border-b border-[var(--color-border)] bg-[var(--color-surface)] shrink-0">
         <div className="px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -123,7 +120,6 @@ export default function Layout() {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
         <aside
           className={`
             fixed md:static inset-y-0 left-0 z-40 w-56 bg-[var(--color-surface)] border-r border-[var(--color-border)]
@@ -167,7 +163,6 @@ export default function Layout() {
           </nav>
         </aside>
 
-        {/* Backdrop for mobile */}
         {sidebarOpen && (
           <div
             className="fixed inset-0 z-30 bg-black/50 md:hidden"
@@ -175,7 +170,6 @@ export default function Layout() {
           />
         )}
 
-        {/* Main content */}
         <main className="flex-1 overflow-y-auto p-6">
           <div className="max-w-5xl mx-auto">
             <Outlet />
