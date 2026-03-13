@@ -41,7 +41,10 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
+    import asyncio
     data_loader.init(OUTPUT_DIR)
+    from .auto_sync import auto_sync_loop
+    asyncio.create_task(auto_sync_loop())
 
 
 app.include_router(health.router, prefix="/api")

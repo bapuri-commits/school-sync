@@ -35,6 +35,12 @@ async def get_status(user: dict = Depends(require_permission("sync"))):
     return state.to_dict()
 
 
+@router.get("/auto-status")
+async def get_auto_status(user: dict = Depends(require_permission("sync"))):
+    from ..auto_sync import get_auto_sync_status
+    return get_auto_sync_status()
+
+
 @router.get("/last-run")
 async def get_last_run(user: dict = Depends(require_permission("sync"))):
     return data_loader.last_run() or {"last_run": None}
@@ -103,16 +109,28 @@ async def trigger_normalize(user: dict = Depends(require_permission("sync"))):
 
 @router.post("/pack")
 async def trigger_pack(body: PackRequest, user: dict = Depends(require_permission("sync"))):
-    cmd = [PYTHON, "-m", "lesson_assist"]
-    if body.all_courses:
-        cmd.extend(["pack", "--all", "--no-open", "--no-sync"])
-    elif body.course:
-        cmd.extend(["pack", "--course", body.course, "--no-open", "--no-sync"])
-    else:
-        cmd.extend(["run", "--no-open", "--no-sync"])
-
     la_dir = tasks.PROJECT_ROOT.parent / "lesson-assist"
-    started = await tasks.run_task("pack", cmd, cwd=la_dir / "src")
+    la_config = la_dir / "config.yaml"
+
+    steps: list[dict] = []
+
+    ctx_cmd = [PYTHON, "context_export.py"]
+    if body.course:
+        ctx_cmd.extend(["--course", body.course])
+    steps.append({"cmd": ctx_cmd, "label": "컨텍스트 갱신"})
+
+    pack_cmd = [PYTHON, "-m", "lesson_assist"]
+    if la_config.exists():
+        pack_cmd.extend(["--config", str(la_config)])
+    if body.all_courses:
+        pack_cmd.extend(["pack", "--all", "--no-open", "--no-sync"])
+    elif body.course:
+        pack_cmd.extend(["pack", "--course", body.course, "--no-open", "--no-sync"])
+    else:
+        pack_cmd.extend(["run", "--no-open", "--no-sync"])
+    steps.append({"cmd": pack_cmd, "cwd": la_dir / "src", "label": "패키징"})
+
+    started = await tasks.run_chained_tasks("pack", steps)
     if not started:
         return {"error": "이미 실행 중인 태스크가 있습니다"}
-    return {"status": "started", "command": cmd}
+    return {"status": "started", "steps": len(steps)}

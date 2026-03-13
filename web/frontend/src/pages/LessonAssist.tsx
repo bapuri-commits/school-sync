@@ -29,6 +29,12 @@ interface TaskStatus {
   exit_code: number | null;
 }
 
+interface CourseInfo {
+  materials: { filename: string; size_kb: number }[];
+  hasContext: boolean;
+  lastCrawl: string | null;
+}
+
 type SSEChunk =
   | { type: "log"; text: string }
   | { type: "status"; status: string; exit_code: number | null }
@@ -54,6 +60,7 @@ export default function LessonAssist() {
   const [logs, setLogs] = useState<string[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [courseInfo, setCourseInfo] = useState<CourseInfo | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -90,6 +97,27 @@ export default function LessonAssist() {
     } catch { /* ignore */ }
   }, []);
 
+  const fetchCourseInfo = useCallback(async (course: string) => {
+    if (!course) { setCourseInfo(null); return; }
+    try {
+      const [courseRes, ctxRes, runRes] = await Promise.all([
+        fetch(`/api/courses/${encodeURIComponent(course)}`),
+        fetch(`/api/courses/${encodeURIComponent(course)}/context`),
+        fetch("/api/sync/last-run"),
+      ]);
+      const materials = courseRes.ok ? (await courseRes.json()).materials || [] : [];
+      const hasContext = ctxRes.ok;
+      const runData = runRes.ok ? await runRes.json() : {};
+      setCourseInfo({
+        materials,
+        hasContext,
+        lastCrawl: runData.last_run || null,
+      });
+    } catch {
+      setCourseInfo(null);
+    }
+  }, []);
+
   useEffect(() => {
     fetchCourses();
     fetchFiles();
@@ -107,6 +135,10 @@ export default function LessonAssist() {
     checkStatus();
     return () => { abortRef.current?.abort(); };
   }, [fetchCourses, fetchFiles, fetchPackages]);
+
+  useEffect(() => {
+    if (uploadCourse) fetchCourseInfo(uploadCourse);
+  }, [uploadCourse, fetchCourseInfo]);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -296,6 +328,37 @@ export default function LessonAssist() {
           onChange={(e) => handleUpload(e.target.files)}
         />
       </section>
+
+      {/* 선택 과목 연동 정보 */}
+      {uploadCourse && courseInfo && (
+        <section className="bg-[var(--color-surface)] rounded-lg p-4 border border-[var(--color-border)]">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold">School Sync 연동 — {uploadCourse}</h2>
+            {courseInfo.lastCrawl && (
+              <span className="text-[11px] text-[var(--color-text-muted)]">
+                마지막 크롤링: {new Date(courseInfo.lastCrawl).toLocaleString("ko-KR")}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            <div>
+              <span className="text-[var(--color-text-muted)]">학습 컨텍스트: </span>
+              <span className={courseInfo.hasContext ? "text-emerald-400" : "text-red-400"}>
+                {courseInfo.hasContext ? "준비됨" : "없음 — 크롤링 필요"}
+              </span>
+            </div>
+            <div>
+              <span className="text-[var(--color-text-muted)]">수업자료: </span>
+              <span>{courseInfo.materials.length > 0 ? `${courseInfo.materials.length}개 파일` : "없음"}</span>
+              {courseInfo.materials.length > 0 && (
+                <span className="text-[var(--color-text-muted)] ml-1">
+                  ({courseInfo.materials.map((m) => m.filename.split(".").pop()?.toUpperCase()).filter((v, i, a) => a.indexOf(v) === i).join(", ")})
+                </span>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* 업로드된 파일 + 패키징 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
