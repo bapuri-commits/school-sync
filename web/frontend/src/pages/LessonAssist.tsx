@@ -220,7 +220,6 @@ export default function LessonAssist() {
         setLogs([`[오류] ${data.error}`]);
         return;
       }
-      fetchStatus();
       await new Promise((r) => setTimeout(r, 300));
       startLogStream();
     } catch (e) {
