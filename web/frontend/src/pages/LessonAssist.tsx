@@ -34,26 +34,21 @@ type SSEChunk =
   | { type: "status"; status: string; exit_code: number | null }
   | { type: "done" };
 
-const COURSES = [
-  "머신러닝",
-  "데이터베이스",
-  "자료구조",
-  "객체지향설계와패턴",
-  "이산수학",
-  "공학선형대수학",
-];
-
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const MAX_CLIENT_SIZE = 50 * 1024 * 1024;
+const ALLOWED_EXT = [".srt", ".txt"];
+
 export default function LessonAssist() {
+  const [courseList, setCourseList] = useState<string[]>([]);
   const [dagloFiles, setDagloFiles] = useState<DagloCourse[]>([]);
   const [packages, setPackages] = useState<PackageCourse[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [uploadCourse, setUploadCourse] = useState(COURSES[0]);
+  const [uploadCourse, setUploadCourse] = useState("");
   const [uploadDate, setUploadDate] = useState("");
   const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -61,6 +56,19 @@ export default function LessonAssist() {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const fetchCourses = useCallback(async () => {
+    try {
+      const r = await fetch("/api/la/courses");
+      if (r.ok) {
+        const data = await r.json();
+        const list: string[] = data.courses || [];
+        setCourseList(list);
+        if (list.length > 0 && !uploadCourse) setUploadCourse(list[0]);
+      }
+    } catch { /* ignore */ }
+  }, []);
 
   const fetchFiles = useCallback(async () => {
     try {
@@ -82,22 +90,23 @@ export default function LessonAssist() {
     } catch { /* ignore */ }
   }, []);
 
-  const fetchStatus = useCallback(async () => {
-    try {
-      const r = await fetch("/api/sync/status");
-      if (r.ok) {
-        const data = await r.json();
-        setTaskStatus(data);
-        if (data.status === "running") startLogStream();
-      }
-    } catch { /* ignore */ }
-  }, []);
-
   useEffect(() => {
+    fetchCourses();
     fetchFiles();
     fetchPackages();
-    fetchStatus();
-  }, [fetchFiles, fetchPackages, fetchStatus]);
+    const checkStatus = async () => {
+      try {
+        const r = await fetch("/api/sync/status");
+        if (r.ok) {
+          const data = await r.json();
+          setTaskStatus(data);
+          if (data.status === "running") startLogStream();
+        }
+      } catch { /* ignore */ }
+    };
+    checkStatus();
+    return () => { abortRef.current?.abort(); };
+  }, [fetchCourses, fetchFiles, fetchPackages]);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -108,6 +117,16 @@ export default function LessonAssist() {
     setUploading(true);
     try {
       for (const file of Array.from(fileList)) {
+        const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+        if (!ALLOWED_EXT.includes(ext)) {
+          alert(`${file.name}: SRT 또는 TXT 파일만 가능합니다`);
+          continue;
+        }
+        if (file.size > MAX_CLIENT_SIZE) {
+          alert(`${file.name}: 파일 크기 초과 (최대 50MB)`);
+          continue;
+        }
+
         const formData = new FormData();
         formData.append("file", file);
         formData.append("course", uploadCourse);
@@ -115,8 +134,13 @@ export default function LessonAssist() {
 
         const r = await fetch("/api/la/upload", { method: "POST", body: formData });
         if (!r.ok) {
-          const err = await r.json();
-          alert(`업로드 실패: ${err.detail || "알 수 없는 오류"}`);
+          try {
+            const err = await r.json();
+            const msg = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail);
+            alert(`업로드 실패: ${msg}`);
+          } catch {
+            alert(`업로드 실패: HTTP ${r.status}`);
+          }
         }
       }
       fetchFiles();
@@ -128,8 +152,13 @@ export default function LessonAssist() {
 
   const handleDelete = async (course: string, filename: string) => {
     if (!confirm(`${filename} 삭제?`)) return;
-    const r = await fetch(`/api/la/files/${encodeURIComponent(course)}/${encodeURIComponent(filename)}`, { method: "DELETE" });
-    if (r.ok) fetchFiles();
+    try {
+      const r = await fetch(`/api/la/files/${encodeURIComponent(course)}/${encodeURIComponent(filename)}`, { method: "DELETE" });
+      if (r.ok) fetchFiles();
+      else alert("삭제 실패");
+    } catch {
+      alert("삭제 요청 실패");
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -139,10 +168,14 @@ export default function LessonAssist() {
   };
 
   const startLogStream = async () => {
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     setStreaming(true);
     try {
-      const res = await fetch("/api/sync/logs/stream");
-      const reader = res.body!.getReader();
+      const res = await fetch("/api/sync/logs/stream", { signal: ctrl.signal });
+      if (!res.body) { setStreaming(false); return; }
+      const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
 
@@ -166,9 +199,10 @@ export default function LessonAssist() {
           } catch { /* skip */ }
         }
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+    }
     setStreaming(false);
-    fetchStatus();
     fetchPackages();
   };
 
@@ -212,9 +246,13 @@ export default function LessonAssist() {
               onChange={(e) => setUploadCourse(e.target.value)}
               className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--color-primary)]"
             >
-              {COURSES.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
+              {courseList.length === 0 ? (
+                <option value="">과목 로딩 중...</option>
+              ) : (
+                courseList.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))
+              )}
             </select>
           </div>
           <div>
