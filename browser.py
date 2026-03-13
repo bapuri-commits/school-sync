@@ -112,41 +112,40 @@ class BrowserSession:
         print(f"[SESSION] nDRIMS SSO 로그인 시도: {base_url}")
         await self._page.goto(base_url, wait_until="networkidle", timeout=60000)
 
-        # SSO 로그인 폼 자동 입력
-        sso_selectors = [
-            ('input[name="username"], input[name="userId"], input[name="id"], #username, #userId', 'input[name="password"], input[name="pw"], #password, #pw'),
-        ]
+        # SSO 로그인 폼 자동 입력 (nDRIMS는 name/id 없는 input 사용)
+        uid_selectors = ['input[name="username"]', 'input[name="userId"]', '#username', '#userId', 'input[type="text"]']
+        pw_selectors = ['input[name="password"]', 'input[name="pw"]', '#password', '#pw', 'input[type="password"]']
 
-        logged_in = False
-        for uid_sel, pw_sel in sso_selectors:
-            try:
-                uid_el = await self._page.query_selector(uid_sel)
-                pw_el = await self._page.query_selector(pw_sel)
-                if uid_el and pw_el:
-                    await uid_el.fill(username)
-                    await pw_el.fill(password)
+        uid_el, pw_el = None, None
+        for sel in uid_selectors:
+            uid_el = await self._page.query_selector(sel)
+            if uid_el:
+                break
+        for sel in pw_selectors:
+            pw_el = await self._page.query_selector(sel)
+            if pw_el:
+                break
 
-                    submit = await self._page.query_selector(
-                        'button[type="submit"], input[type="submit"], .btn_login, .login_btn, #loginBtn'
-                    )
-                    if submit:
-                        await submit.click()
-                    else:
-                        await self._page.keyboard.press("Enter")
+        if uid_el and pw_el:
+            await uid_el.fill(username)
+            await pw_el.fill(password)
 
-                    await self._page.wait_for_load_state("networkidle", timeout=30000)
-                    logged_in = True
-                    break
-            except Exception as e:
-                print(f"[SESSION] SSO 폼 시도 실패: {e}")
-
-        if not logged_in:
-            print(f"[SESSION] SSO 로그인 폼을 찾지 못했습니다. 현재 URL: {self._page.url}")
-            content = await self._page.content()
-            if "main.clx" in self._page.url:
-                print(f"[SESSION] 이미 로그인된 상태입니다.")
+            submit = await self._page.query_selector(
+                'button[type="submit"], input[type="submit"], .btn_login, .login_btn, #loginBtn, a.btn'
+            )
+            if submit:
+                await submit.click()
             else:
-                raise RuntimeError(f"nDRIMS SSO 로그인 실패 — 로그인 폼을 찾을 수 없습니다 ({self._page.url})")
+                await self._page.keyboard.press("Enter")
+
+            try:
+                await self._page.wait_for_load_state("networkidle", timeout=30000)
+            except Exception:
+                await asyncio.sleep(5)
+        elif "main.clx" in self._page.url:
+            print(f"[SESSION] 이미 로그인된 상태입니다.")
+        else:
+            raise RuntimeError(f"nDRIMS SSO 로그인 실패 — 로그인 폼을 찾을 수 없습니다 ({self._page.url})")
 
         # SSO 리다이렉트 대기 — main.clx 로드 확인
         for _ in range(30):
