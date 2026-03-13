@@ -5,6 +5,7 @@ import type { Permission } from "../types";
 const NAV: { to: string; label: string; perm: Permission }[] = [
   { to: "/", label: "대시보드", perm: "dashboard" },
   { to: "/ask", label: "AI Q&A", perm: "ask" },
+  { to: "/lesson-assist", label: "Lesson Assist", perm: "sync" },
   { to: "/sync", label: "동기화", perm: "sync" },
 ];
 

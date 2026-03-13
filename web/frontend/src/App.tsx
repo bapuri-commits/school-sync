@@ -5,6 +5,7 @@ import Dashboard from "./pages/Dashboard";
 import CourseDetail from "./pages/CourseDetail";
 import AskChat from "./pages/AskChat";
 import SyncControl from "./pages/SyncControl";
+import LessonAssist from "./pages/LessonAssist";
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
             <Route path="courses/:name" element={<CourseDetail />} />
             <Route path="ask" element={<AskChat />} />
             <Route path="sync" element={<SyncControl />} />
+            <Route path="lesson-assist" element={<LessonAssist />} />
           </Route>
         </Routes>
       </BrowserRouter>
