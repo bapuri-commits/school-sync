@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import data_loader
-from .routes import health, dashboard, courses, data, ask, sync, me, lesson_assist
+from .routes import health, dashboard, courses, data, ask, sync, me, lesson_assist, gdrive
 
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", Path(__file__).resolve().parent.parent / "output"))
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
@@ -64,6 +64,7 @@ app.include_router(ask.router, prefix="/api")
 app.include_router(sync.router, prefix="/api")
 app.include_router(me.router, prefix="/api")
 app.include_router(lesson_assist.router, prefix="/api")
+app.include_router(gdrive.router, prefix="/api")
 
 if FRONTEND_DIR.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")

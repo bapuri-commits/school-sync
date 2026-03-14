@@ -63,6 +63,8 @@ export default function LessonAssist() {
   const [dragOver, setDragOver] = useState(false);
   const [courseInfo, setCourseInfo] = useState<CourseInfo | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [gdriveEnabled, setGdriveEnabled] = useState(false);
+  const [uploadingToDrive, setUploadingToDrive] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -129,6 +131,9 @@ export default function LessonAssist() {
       } catch { /* ignore */ }
     };
     checkStatus();
+    fetch("/api/gdrive/status").then(r => r.ok ? r.json() : null).then(d => {
+      if (d) setGdriveEnabled(d.enabled);
+    }).catch(() => {});
     return () => { abortRef.current?.abort(); };
   }, [fetchCourses, fetchFiles, fetchPackages]);
 
@@ -274,6 +279,27 @@ export default function LessonAssist() {
       startLogStream();
     } catch (e) {
       setLogs([`[연결 오류] ${e instanceof Error ? e.message : "unknown"}`]);
+    }
+  };
+
+  const uploadToDrive = async (course: string) => {
+    setUploadingToDrive(course);
+    try {
+      const r = await fetch("/api/gdrive/upload/package", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ course }),
+      });
+      const data = await r.json();
+      if (r.ok) {
+        alert(`${course}: ${data.uploaded}개 파일 Drive 업로드 완료`);
+      } else {
+        alert(`Drive 업로드 실패: ${data.detail || "알 수 없는 오류"}`);
+      }
+    } catch {
+      alert("Drive 업로드 요청 실패");
+    } finally {
+      setUploadingToDrive(null);
     }
   };
 
@@ -459,12 +485,23 @@ export default function LessonAssist() {
                 <div key={p.course} className="p-3">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium">{p.course}</span>
-                    <button
-                      onClick={() => downloadAll(p.course, p.files)}
-                      className="text-xs text-[var(--color-primary)] hover:underline"
-                    >
-                      전체 다운로드
-                    </button>
+                    <div className="flex gap-2">
+                      {gdriveEnabled && (
+                        <button
+                          onClick={() => uploadToDrive(p.course)}
+                          disabled={uploadingToDrive === p.course}
+                          className="text-xs text-emerald-400 hover:underline disabled:opacity-50"
+                        >
+                          {uploadingToDrive === p.course ? "업로드 중..." : "Drive 내보내기"}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => downloadAll(p.course, p.files)}
+                        className="text-xs text-[var(--color-primary)] hover:underline"
+                      >
+                        전체 다운로드
+                      </button>
+                    </div>
                   </div>
                   <div className="space-y-1">
                     {p.files.map((f) => (

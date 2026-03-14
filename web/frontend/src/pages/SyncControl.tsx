@@ -31,6 +31,8 @@ export default function SyncControl() {
   const [crawlSites, setCrawlSites] = useState<Set<string>>(new Set(["eclass"]));
   const [crawlDownload, setCrawlDownload] = useState(false);
   const [packCourse, setPackCourse] = useState("");
+  const [packUploadDrive, setPackUploadDrive] = useState(false);
+  const [gdriveEnabled, setGdriveEnabled] = useState(false);
 
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -57,6 +59,9 @@ export default function SyncControl() {
     fetchStatus();
     fetchLastRun();
     fetchAutoSync();
+    fetch("/api/gdrive/status").then(r => r.ok ? r.json() : null).then(d => {
+      if (d) setGdriveEnabled(d.enabled);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -269,9 +274,23 @@ export default function SyncControl() {
               disabled={isRunning}
               className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--color-primary)] disabled:opacity-50 placeholder:text-[var(--color-text-muted)]"
             />
+            {gdriveEnabled && (
+              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={packUploadDrive}
+                  onChange={(e) => setPackUploadDrive(e.target.checked)}
+                  disabled={isRunning}
+                />
+                <span className="text-[var(--color-text-muted)]">완료 후 Drive 업로드</span>
+              </label>
+            )}
             <button
               onClick={() =>
-                triggerAction("pack", packCourse ? { course: packCourse } : { all_courses: true })
+                triggerAction("pack", {
+                  ...(packCourse ? { course: packCourse } : { all_courses: true }),
+                  upload_to_drive: packUploadDrive,
+                })
               }
               disabled={isRunning}
               className="w-full py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"

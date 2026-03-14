@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from ..auth import require_permission
 from .. import tasks, data_loader
+from ..gdrive import GDRIVE_ENABLED, GDRIVE_ROOT_FOLDER_ID, get_uploader
 
 router = APIRouter(prefix="/sync")
 
@@ -27,6 +28,7 @@ class CrawlRequest(BaseModel):
 class PackRequest(BaseModel):
     course: str | None = None
     all_courses: bool = False
+    upload_to_drive: bool = False
 
 
 @router.get("/status")
@@ -141,7 +143,33 @@ async def trigger_pack(body: PackRequest, user: dict = Depends(require_permissio
         pack_cmd.extend(["--config", str(la_config)])
     steps.append({"cmd": pack_cmd, "cwd": la_dir / "src", "label": "패키징"})
 
-    started = await tasks.run_chained_tasks("pack", steps)
+    on_complete = None
+    if body.upload_to_drive and GDRIVE_ENABLED:
+        import os
+        from pathlib import Path
+
+        la_data = Path(os.getenv("LA_DATA_DIR", "/data/lesson-assist"))
+        packages_dir = la_data / "output" / "notebooklm"
+        target_course = body.course
+
+        def _upload_to_drive():
+            uploader = get_uploader()
+            hub = uploader.find_or_create_folder("StudyHub", GDRIVE_ROOT_FOLDER_ID)
+            pkg = uploader.find_or_create_folder("수업자료", hub)
+            if target_course:
+                course_dir = packages_dir / target_course
+                if course_dir.is_dir():
+                    cf = uploader.find_or_create_folder(target_course, pkg)
+                    uploader.upload_directory(str(course_dir), cf)
+            elif packages_dir.is_dir():
+                for d in packages_dir.iterdir():
+                    if d.is_dir() and not d.name.startswith("."):
+                        cf = uploader.find_or_create_folder(d.name, pkg)
+                        uploader.upload_directory(str(d), cf)
+
+        on_complete = _upload_to_drive
+
+    started = await tasks.run_chained_tasks("pack", steps, on_complete=on_complete)
     if not started:
         return {"error": "이미 실행 중인 태스크가 있습니다"}
     return {"status": "started", "steps": len(steps)}

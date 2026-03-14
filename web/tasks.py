@@ -7,12 +7,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+log = logging.getLogger("tasks")
 
 
 class TaskStatus(str, Enum):
@@ -117,7 +120,11 @@ async def run_task(task_type: str, cmd: list[str], cwd: str | Path | None = None
     return True
 
 
-async def run_chained_tasks(task_type: str, steps: list[dict]) -> bool:
+async def run_chained_tasks(
+    task_type: str,
+    steps: list[dict],
+    on_complete: Callable[[], None] | None = None,
+) -> bool:
     """여러 subprocess를 순차 실행한다. 중간 실패 시 중단."""
     if _state.status == TaskStatus.RUNNING:
         return False
@@ -168,6 +175,15 @@ async def run_chained_tasks(task_type: str, steps: list[dict]) -> bool:
 
             _state.exit_code = 0
             _state.status = TaskStatus.COMPLETED
+
+            if on_complete:
+                try:
+                    _state.logs.append("[StudyHub] 후처리 실행 중...")
+                    on_complete()
+                    _state.logs.append("[StudyHub] 후처리 완료")
+                except Exception as e:
+                    log.warning("on_complete 콜백 실패: %s", e)
+                    _state.logs.append(f"[StudyHub] 후처리 실패 (무시): {e}")
         except Exception as e:
             _state.logs.append(f"[StudyHub] 오류: {e}")
             _state.status = TaskStatus.FAILED

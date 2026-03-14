@@ -1,5 +1,7 @@
 anthropic
 fastapi
+google-auth
+google-api-python-client
 httpx
 loguru
 playwright
