@@ -179,7 +179,7 @@ async def run_chained_tasks(
             if on_complete:
                 try:
                     _state.logs.append("[StudyHub] 후처리 실행 중...")
-                    on_complete()
+                    await asyncio.to_thread(on_complete)
                     _state.logs.append("[StudyHub] 후처리 완료")
                 except Exception as e:
                     log.warning("on_complete 콜백 실패: %s", e)

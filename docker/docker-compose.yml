@@ -10,9 +10,9 @@ services:
       - ${DATA_DIR:-../data}/output:/app/output
       - /opt/apps/lesson-assist:/lesson-assist
       - ${DATA_DIR:-../data}/lesson-assist:/data/lesson-assist
-      - ${GDRIVE_SERVICE_ACCOUNT_PATH:-/opt/envs/gdrive-service-account.json}:/secrets/gdrive.json:ro
+      - /opt/envs/gdrive-token.json:/secrets/gdrive-token.json
     environment:
-      GDRIVE_SERVICE_ACCOUNT_PATH: /secrets/gdrive.json
+      GDRIVE_TOKEN_PATH: /secrets/gdrive-token.json
     env_file:
       - .env
     extra_hosts:
