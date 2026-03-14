@@ -18,8 +18,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-VPS_HOST = os.getenv("VPS_HOST", "46.250.251.82")
-VPS_USER = os.getenv("VPS_USER", "dev")
+VPS_HOST = os.getenv("VPS_HOST", "")
+VPS_USER = os.getenv("VPS_USER", "")
 VPS_DATA_DIR = "/opt/data/study/output/raw/ndrims"
 
 LOCAL_OUTPUT = Path(__file__).parent / "output" / "raw" / "ndrims" / "ndrims.json"
@@ -34,6 +34,12 @@ def main():
     print("=" * 50)
     print("  nDRIMS 로컬 크롤 → VPS 동기화")
     print("=" * 50)
+
+    if not VPS_HOST or not VPS_USER:
+        print("[실패] .env에 VPS_HOST, VPS_USER를 설정해주세요.")
+        print("  예: VPS_HOST=46.250.251.82")
+        print("      VPS_USER=dev")
+        sys.exit(1)
 
     # 1. 로컬 크롤링
     print("\n[1/3] nDRIMS 크롤링 (SSO 수동 로그인)")
@@ -56,10 +62,13 @@ def main():
     print(f"\n[2/3] VPS로 전송 ({VPS_USER}@{VPS_HOST})")
     dest = f"{VPS_USER}@{VPS_HOST}:{VPS_DATA_DIR}/ndrims.json"
 
-    run([
+    result = run([
         "ssh", f"{VPS_USER}@{VPS_HOST}",
         f"mkdir -p {VPS_DATA_DIR}",
     ])
+    if result.returncode != 0:
+        print("[실패] VPS 연결 또는 디렉토리 생성 실패")
+        sys.exit(1)
 
     result = run(["scp", str(LOCAL_OUTPUT), dest])
     if result.returncode != 0:

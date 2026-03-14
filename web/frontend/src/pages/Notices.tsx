@@ -1,17 +1,18 @@
 import { useEffect, useState } from "react";
+import { api } from "../api";
 import type { Notice } from "../types";
 
 export default function Notices() {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"eclass" | "other">("eclass");
   const [expanded, setExpanded] = useState<number | null>(null);
 
   useEffect(() => {
-    fetch("/api/notices")
-      .then((r) => r.json())
+    api.notices()
       .then(setNotices)
-      .catch(() => {})
+      .catch((e) => setError(e.message ?? "공지 로드 실패"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -20,6 +21,7 @@ export default function Notices() {
   const items = tab === "eclass" ? eclass : other;
 
   if (loading) return <div className="text-[var(--color-text-muted)] py-12 text-center">불러오는 중...</div>;
+  if (error) return <div className="py-12 text-center"><p className="text-red-400">{error}</p></div>;
 
   return (
     <div className="space-y-4">

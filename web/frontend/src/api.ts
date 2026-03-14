@@ -1,4 +1,4 @@
-import type { Course, CourseDetail, DashboardData, UserInfo } from "./types";
+import type { Course, CourseDetail, DashboardData, Notice, UserInfo } from "./types";
 
 const BASE = "/api";
 
@@ -15,6 +15,7 @@ export const api = {
   dashboard: () => get<DashboardData>("/dashboard"),
   courses: () => get<Course[]>("/courses"),
   course: (name: string) => get<CourseDetail>(`/courses/${encodeURIComponent(name)}`),
+  notices: () => get<Notice[]>("/notices"),
 
   askStream: async function* (question: string, webSearch: boolean = true, sessionId: string = "default"): AsyncGenerator<SSEChunk> {
     const res = await fetch(`${BASE}/ask`, {

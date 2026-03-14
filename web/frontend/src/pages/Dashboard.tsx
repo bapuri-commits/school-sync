@@ -192,12 +192,15 @@ function NoticeSection({ eclassNotices, otherNotices }: { eclassNotices: Notice[
                   {n.course_name}
                 </span>
               )}
-              <span className="flex-1 truncate">{n.title}</span>
-              {tab === "eclass" && n.body && (
-                <span className="text-[var(--color-text-muted)] text-xs shrink-0">
-                  {expanded === i ? "접기" : "펼치기"}
+              {tab === "other" && n.board_name && (
+                <span className="px-1.5 py-0.5 rounded bg-[var(--color-surface-hover)] text-xs text-[var(--color-text-muted)] shrink-0">
+                  {n.board_name}
                 </span>
               )}
+              <span className="flex-1 truncate">{n.title}</span>
+              <span className="text-[var(--color-text-muted)] text-xs shrink-0">
+                {expanded === i ? "접기" : (tab === "eclass" && n.body ? "펼치기" : tab === "other" ? "링크" : "")}
+              </span>
             </div>
             {expanded === i && tab === "eclass" && n.body && (
               <div className="mt-2 ml-24 text-xs text-[var(--color-text-muted)] whitespace-pre-wrap bg-[var(--color-bg)] rounded p-3 border border-[var(--color-border)]">

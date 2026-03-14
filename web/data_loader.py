@@ -156,12 +156,13 @@ def dashboard_summary() -> dict:
     upcoming.sort(key=lambda d: d.get("d_day", 999))
 
     all_notices = notices()
+    notice_cutoff = (date.today() - timedelta(days=30)).isoformat()
     eclass_notices = sorted(
-        [n for n in all_notices if n.get("source_site") == "eclass" and n.get("date", "") >= today_str[:7]],
+        [n for n in all_notices if n.get("source_site") == "eclass" and n.get("date", "") >= notice_cutoff],
         key=lambda n: n.get("date", ""), reverse=True,
     )
     other_notices = sorted(
-        [n for n in all_notices if n.get("source_site") != "eclass" and n.get("date", "") >= today_str[:7]],
+        [n for n in all_notices if n.get("source_site") != "eclass" and n.get("date", "") >= notice_cutoff],
         key=lambda n: n.get("date", ""), reverse=True,
     )
 
