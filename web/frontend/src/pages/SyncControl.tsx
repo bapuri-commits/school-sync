@@ -158,7 +158,7 @@ export default function SyncControl() {
   };
 
   const isRunning = taskStatus?.status === "running" || streaming;
-  const SITES = ["eclass", "portal", "department", "ndrims"];
+  const SITES = ["eclass", "portal", "department"];
 
   return (
     <div className="space-y-6">
@@ -216,9 +216,12 @@ export default function SyncControl() {
                   {s}
                 </button>
               ))}
-              {crawlSites.has("ndrims") && (
-                <span className="text-[10px] text-amber-400 ml-1">SSO 수동 로그인 필요</span>
-              )}
+              <span
+                title="SSO 수동 로그인 필요 — 로컬에서 python main.py --site ndrims 실행"
+                className="text-xs px-2.5 py-1 rounded-full border border-[var(--color-border)] text-[var(--color-text-muted)] opacity-40 cursor-help"
+              >
+                ndrims (로컬 전용)
+              </span>
             </div>
             <label className="flex items-center gap-1.5 text-sm cursor-pointer">
               <input
