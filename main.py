@@ -154,6 +154,9 @@ async def run(args):
             else:
                 await crawler.crawl(session)
 
+        except RuntimeError as e:
+            print(f"\n[{site_name}] {e}")
+            continue
         finally:
             if session:
                 await session.close()
