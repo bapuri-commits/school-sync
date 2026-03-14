@@ -23,6 +23,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "School Sync",
     items: [
       { to: "/", label: "대시보드", perm: "dashboard" },
+      { to: "/notices", label: "공지", perm: "notices" },
       { to: "/ask", label: "AI Q&A", perm: "ask" },
       { to: "/sync", label: "동기화", perm: "sync" },
     ],

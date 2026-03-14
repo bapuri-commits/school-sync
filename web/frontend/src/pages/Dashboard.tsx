@@ -144,34 +144,62 @@ export default function Dashboard() {
       </section>
 
       {/* 최근 공지 */}
-      <NoticeSection notices={data.recent_notices.slice(0, 8)} />
+      <NoticeSection
+        eclassNotices={data.recent_eclass_notices}
+        otherNotices={data.recent_other_notices}
+      />
     </div>
   );
 }
 
-function NoticeSection({ notices }: { notices: Notice[] }) {
+function NoticeSection({ eclassNotices, otherNotices }: { eclassNotices: Notice[]; otherNotices: Notice[] }) {
+  const [tab, setTab] = useState<"eclass" | "other">("eclass");
   const [expanded, setExpanded] = useState<number | null>(null);
+  const items = tab === "eclass" ? eclassNotices : otherNotices;
 
   return (
-    <section className="bg-[var(--color-surface)] rounded-lg p-4 border border-[var(--color-border)]">
-      <h2 className="text-sm font-semibold text-[var(--color-text-muted)] mb-3">최근 공지</h2>
-      <ul className="divide-y divide-[var(--color-border)]">
-        {notices.map((n, i) => (
+    <section className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)]">
+      <div className="flex items-center justify-between px-4 pt-3 pb-2">
+        <div className="flex gap-2">
+          {(["eclass", "other"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => { setTab(t); setExpanded(null); }}
+              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                tab === t
+                  ? "border-[var(--color-primary)] bg-[var(--color-primary)]/20 text-[var(--color-primary)]"
+                  : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-primary)]"
+              }`}
+            >
+              {t === "eclass" ? `eClass (${eclassNotices.length})` : `학교 공지 (${otherNotices.length})`}
+            </button>
+          ))}
+        </div>
+        <Link to="/notices" className="text-xs text-[var(--color-primary)] hover:underline">전체 보기</Link>
+      </div>
+      <ul className="divide-y divide-[var(--color-border)] px-4 pb-3">
+        {items.length === 0 ? (
+          <li className="py-3 text-sm text-[var(--color-text-muted)]">공지가 없습니다</li>
+        ) : items.map((n, i) => (
           <li key={i} className="py-2">
             <div
               className="flex items-start gap-3 text-sm cursor-pointer hover:text-[var(--color-primary)] transition-colors"
               onClick={() => setExpanded(expanded === i ? null : i)}
             >
               <span className="text-[var(--color-text-muted)] text-xs shrink-0 w-20">{n.date}</span>
-              <span className="px-1.5 py-0.5 rounded bg-[var(--color-surface-hover)] text-xs text-[var(--color-text-muted)] shrink-0">
-                {n.course_name}
-              </span>
+              {tab === "eclass" && n.course_name && (
+                <span className="px-1.5 py-0.5 rounded bg-[var(--color-surface-hover)] text-xs text-[var(--color-text-muted)] shrink-0">
+                  {n.course_name}
+                </span>
+              )}
               <span className="flex-1 truncate">{n.title}</span>
-              <span className="text-[var(--color-text-muted)] text-xs shrink-0">
-                {n.body ? (expanded === i ? "접기" : "펼치기") : ""}
-              </span>
+              {tab === "eclass" && n.body && (
+                <span className="text-[var(--color-text-muted)] text-xs shrink-0">
+                  {expanded === i ? "접기" : "펼치기"}
+                </span>
+              )}
             </div>
-            {expanded === i && n.body && (
+            {expanded === i && tab === "eclass" && n.body && (
               <div className="mt-2 ml-24 text-xs text-[var(--color-text-muted)] whitespace-pre-wrap bg-[var(--color-bg)] rounded p-3 border border-[var(--color-border)]">
                 {n.body}
                 {n.attachments && n.attachments.length > 0 && (
@@ -186,11 +214,18 @@ function NoticeSection({ notices }: { notices: Notice[] }) {
                 )}
               </div>
             )}
-            {expanded === i && !n.body && (
+            {expanded === i && tab === "eclass" && !n.body && (
               <div className="mt-2 ml-24 text-xs text-[var(--color-text-muted)]">
                 본문 없음 —{" "}
                 <a href={n.url} target="_blank" rel="noopener noreferrer" className="text-[var(--color-primary)] hover:underline">
                   eClass에서 보기
+                </a>
+              </div>
+            )}
+            {expanded === i && tab === "other" && (
+              <div className="mt-2 ml-24 text-xs text-[var(--color-text-muted)]">
+                <a href={n.url} target="_blank" rel="noopener noreferrer" className="text-[var(--color-primary)] hover:underline">
+                  원본 링크에서 보기
                 </a>
               </div>
             )}

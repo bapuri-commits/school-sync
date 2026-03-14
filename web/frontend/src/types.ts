@@ -85,7 +85,8 @@ export interface DashboardData {
   weekday: string;
   today_classes: { course_name: string; schedule: string; room: string }[];
   upcoming_deadlines: Deadline[];
-  recent_notices: Notice[];
+  recent_eclass_notices: Notice[];
+  recent_other_notices: Notice[];
   new_notice_courses: string[];
   last_run: { last_run: string; sites: string[] } | null;
 }
