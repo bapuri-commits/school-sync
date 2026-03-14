@@ -4,7 +4,7 @@ import asyncio
 from config import BASE_URL, REQUEST_DELAY, GLOBAL_BOARD_IDS, REQUEST_TIMEOUT
 
 _GOTO_TIMEOUT = int(REQUEST_TIMEOUT * 1000)
-from cache import is_new_or_updated, mark_collected, content_hash
+from cache import mark_collected, content_hash
 
 
 async def extract_boards(page, course_id: int, scanned_boards: list[dict] | None = None) -> dict[str, list[dict]]:
@@ -42,20 +42,22 @@ async def extract_boards(page, course_id: int, scanned_boards: list[dict] | None
         await asyncio.sleep(REQUEST_DELAY)
         posts = await _extract_board_posts(page, board["id"], board["name"])
 
-        new_count = 0
+        body_count = 0
         for post in posts:
             link = post.get("_link", "")
-            date = post.get("작성일", post.get("date", post.get("col_3", "")))
-            if link and is_new_or_updated(link, date):
-                body_data = await _extract_post_body(page, link)
-                post["_body"] = body_data.get("body", "")
-                post["_attachments"] = body_data.get("attachments", [])
-                mark_collected(link, date, content_hash(post.get("_body", "")))
-                new_count += 1
-                await asyncio.sleep(REQUEST_DELAY)
+            if not link:
+                continue
+            body_data = await _extract_post_body(page, link)
+            post["_body"] = body_data.get("body", "")
+            post["_attachments"] = body_data.get("attachments", [])
 
-        if new_count > 0:
-            print(f"      본문 수집: {new_count}개 (신규/변경)")
+            date = post.get("작성일", post.get("date", post.get("col_3", "")))
+            mark_collected(link, date, content_hash(post.get("_body", "")))
+            body_count += 1
+            await asyncio.sleep(REQUEST_DELAY)
+
+        if body_count > 0:
+            print(f"      본문 수집: {body_count}개")
 
         result[board["name"]] = {
             "board_id": board["id"],

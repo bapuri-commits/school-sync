@@ -180,6 +180,12 @@ async def create_session(headless: bool = True, site: str = "eclass") -> Browser
     session = BrowserSession()
 
     if site == "ndrims":
+        if headless:
+            raise RuntimeError(
+                "nDRIMS는 SSO 수동 로그인이 필요합니다. "
+                "Docker/서버 환경에서는 사용할 수 없습니다. "
+                "로컬 환경에서 python main.py --site ndrims 로 실행해주세요."
+            )
         await session.start(headless=False)
         await session.login_ndrims()
     else:
