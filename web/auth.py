@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import os
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +30,8 @@ ALL_PERMISSIONS = {"dashboard", "courses", "grades", "materials", "ask", "sync",
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
 _PERMISSIONS_PATH = Path(__file__).resolve().parent.parent / "permissions.yaml"
+_permissions_cache: dict[str, list[str]] | None = None
+_permissions_mtime: float = 0
 
 
 def _get_secret() -> str:
@@ -53,12 +54,18 @@ def _decode_token(token: str) -> dict:
 
 
 def load_permissions() -> dict[str, list[str]]:
-    """permissions.yaml를 로드한다. 파일이 없으면 빈 dict 반환."""
+    """permissions.yaml를 로드한다. 파일 mtime이 바뀌지 않으면 캐시 반환."""
+    global _permissions_cache, _permissions_mtime
     if not _PERMISSIONS_PATH.exists():
         return {}
     try:
+        mtime = _PERMISSIONS_PATH.stat().st_mtime
+        if _permissions_cache is not None and mtime == _permissions_mtime:
+            return _permissions_cache
         data = yaml.safe_load(_PERMISSIONS_PATH.read_text(encoding="utf-8")) or {}
-        return data.get("users", {})
+        _permissions_cache = data.get("users", {})
+        _permissions_mtime = mtime
+        return _permissions_cache
     except (yaml.YAMLError, OSError) as e:
         import logging
         logging.getLogger("studyhub.auth").warning(f"permissions.yaml 로드 실패: {e}")

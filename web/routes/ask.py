@@ -21,6 +21,8 @@ router = APIRouter()
 
 MAX_SESSIONS = 50
 SESSION_TTL = 3600
+MAX_QUESTION_LEN = 2000
+MAX_HISTORY_TURNS = 20
 
 _sessions: OrderedDict[str, dict] = OrderedDict()
 
@@ -92,7 +94,15 @@ async def _stream_response(question: str, history: list[dict], web_search: bool)
 
 @router.post("/ask")
 async def ask(body: AskRequest, user: dict = Depends(require_permission("ask"))):
+    if len(body.question) > MAX_QUESTION_LEN:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            {"detail": f"질문이 너무 깁니다 (최대 {MAX_QUESTION_LEN}자)"},
+            status_code=400,
+        )
     history = _get_history(body.session_id)
+    if len(history) > MAX_HISTORY_TURNS * 2:
+        del history[: len(history) - MAX_HISTORY_TURNS * 2]
     return StreamingResponse(
         _stream_response(body.question, history, body.web_search),
         media_type="text/event-stream",

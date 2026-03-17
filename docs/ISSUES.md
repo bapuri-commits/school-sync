@@ -54,6 +54,29 @@
 
 ---
 
+## 웹 서비스 감사 (2026-03-17)
+
+> StudyHub 전체 코드 감사. 백엔드 9개 라우터 + 프론트엔드 6페이지 + Docker 설정.
+
+### 즉시 수정 완료
+
+- [x] **data_loader.py 과목 필터 불일치** — `notices`와 `deadlines`가 `in`(부분 매칭)을 사용해 "자료" 요청 시 "자료구조" 데이터까지 노출. `_filter_by_course()` (`==` 정확 매칭)로 통일.
+- [x] **ask.py 질문 길이/히스토리 무제한** — 질문 최대 2,000자 제한 + 히스토리 최근 20턴만 유지. API 비용 폭증 방지.
+- [x] **auth.py permissions 매 요청 파일 I/O** — `load_permissions()`가 매 요청마다 YAML 파싱. mtime 기반 캐시 도입 — 파일 변경 시만 재로드.
+- [x] **gdrive 라우트 과목명 경로 검증 부재** — `body.course`를 검증 없이 경로에 사용. `_validate_course()` 추가 (정규식 + `..` 차단).
+- [x] **docker-compose healthcheck 미설정** — `/api/health` 엔드포인트 활용 healthcheck 추가 (60초 간격).
+
+### 미해결: 리팩토링 필요 (시간 있을 때)
+
+- [ ] **ask.py `sys.path.insert` 제거** — 모듈 레벨에서 프로젝트 루트를 sys.path에 삽입하여 `ask.py`를 import. `ask.py`를 패키지화(`web/ask_engine.py` 등)하거나 `web/routes/ask.py`에서 상대 import로 변경 권장.
+- [ ] **SSE 클라이언트 코드 중복 (프론트엔드)** — `SyncControl.tsx`와 `LessonAssist.tsx`에 SSE 스트리밍 코드 약 50줄이 거의 동일. `useLogStream` 커스텀 훅으로 추출.
+- [ ] **auto_sync.py 비활성화 반응 지연** — `asyncio.sleep(6시간)` 후에야 `_enabled` 체크. 짧은 간격(60초)으로 깨어나서 시간 기반 판단으로 변경하면 토글 즉시 반영.
+- [ ] **React Error Boundary 미적용** — 렌더링 에러 시 전체 앱 흰 화면. 라우트별 ErrorBoundary 추가 권장.
+- [ ] **tasks.py 단일 워커 전제** — 모듈 글로벌 `_state`. uvicorn 멀티 워커 시 태스크 중복 실행 가능. 현재 단일 워커이므로 문제없으나 스케일업 시 주의.
+- [ ] **docker-compose 리소스 제한 미설정** — 메모리/CPU 제한 없음. Playwright 크롤링이 리소스 과다 소비할 수 있음.
+
+---
+
 ## 장기 개선 (Future)
 
 - **nDRIMS SSO 자동 로그인**: 현재 수동 로그인 필수. credential 기반 자동화 또는 세션 재활용

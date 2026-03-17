@@ -136,9 +136,9 @@ def course_detail(course_name: str) -> dict:
         "syllabus": syl,
         "grades": _filter_by_course(grades(), course_name),
         "attendance": _filter_by_course(attendance(), course_name),
-        "notices": [n for n in notices() if course_name in n.get("course_name", "")],
+        "notices": _filter_by_course(notices(), course_name),
         "assignments": _filter_by_course(assignments(), course_name),
-        "deadlines": [d for d in deadlines() if d.get("course_name") and course_name in d["course_name"]],
+        "deadlines": _filter_by_course(deadlines(), course_name),
         "materials": downloads_manifest(course_name),
     }
 
