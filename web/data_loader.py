@@ -7,9 +7,19 @@ school_sync가 생성한 output/normalized/ 디렉토리의 JSON/MD 파일을
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+_KST_OFFSET = timedelta(hours=9)
+
+
+def _now_kst() -> datetime:
+    return datetime.utcnow() + _KST_OFFSET
+
+
+def _today_kst() -> date:
+    return _now_kst().date()
 
 _OUTPUT_DIR: Path | None = None
 
@@ -145,8 +155,9 @@ def course_detail(course_name: str) -> dict:
 
 def dashboard_summary() -> dict:
     """대시보드용 요약 데이터를 반환한다."""
-    today_str = date.today().isoformat()
-    weekday_kr = ["월", "화", "수", "목", "금", "토", "일"][date.today().weekday()]
+    today = _today_kst()
+    today_str = today.isoformat()
+    weekday_kr = ["월", "화", "수", "목", "금", "토", "일"][today.weekday()]
 
     tt = timetable()
     today_classes = [t for t in tt if weekday_kr in t.get("schedule", "")]
@@ -156,7 +167,7 @@ def dashboard_summary() -> dict:
     upcoming.sort(key=lambda d: d.get("d_day", 999))
 
     all_notices = notices()
-    notice_cutoff = (date.today() - timedelta(days=30)).isoformat()
+    notice_cutoff = (today - timedelta(days=30)).isoformat()
     eclass_notices = sorted(
         [n for n in all_notices if n.get("source_site") == "eclass" and n.get("date", "") >= notice_cutoff],
         key=lambda n: n.get("date", ""), reverse=True,
@@ -166,7 +177,7 @@ def dashboard_summary() -> dict:
         key=lambda n: n.get("date", ""), reverse=True,
     )
 
-    cutoff = (date.today() - timedelta(days=2)).isoformat()
+    cutoff = (today - timedelta(days=2)).isoformat()
     new_notice_courses = set()
     for n in eclass_notices:
         if n.get("date", "") >= cutoff and n.get("course_name"):

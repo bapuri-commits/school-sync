@@ -16,7 +16,7 @@ type SSEChunk =
 
 interface AutoSyncStatus {
   enabled: boolean;
-  interval_hours: number;
+  schedule: string;
   last_auto: string | null;
   next_auto: string | null;
 }
@@ -182,7 +182,7 @@ export default function SyncControl() {
             <div>
               <span className="text-sm font-medium">자동 동기화</span>
               <span className="text-xs text-[var(--color-text-muted)] ml-2">
-                {autoSync.enabled ? `${autoSync.interval_hours}시간 간격` : "비활성"}
+                {autoSync.enabled ? autoSync.schedule : "비활성"}
                 {autoSync.enabled && autoSync.next_auto && ` · 다음: ${new Date(autoSync.next_auto).toLocaleString("ko-KR")}`}
                 {autoSync.last_auto && ` · 마지막: ${new Date(autoSync.last_auto).toLocaleString("ko-KR")}`}
               </span>

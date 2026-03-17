@@ -140,28 +140,57 @@ function AttendanceTab({ data }: { data: CourseDetailType }) {
 }
 
 function NoticesTab({ data }: { data: CourseDetailType }) {
+  const [expanded, setExpanded] = useState<number | null>(null);
+
   if (!data.notices.length)
     return <p className="text-[var(--color-text-muted)]">공지 없음</p>;
   return (
     <ul className="divide-y divide-[var(--color-border)]">
       {data.notices.map((n, i) => (
         <li key={i} className="py-3">
-          <div className="flex items-start gap-3">
+          <div
+            className="flex items-start gap-3 cursor-pointer hover:text-[var(--color-primary)] transition-colors"
+            onClick={() => setExpanded(expanded === i ? null : i)}
+          >
             <span className="text-xs text-[var(--color-text-muted)] shrink-0 w-20">{n.date}</span>
             <div className="flex-1 min-w-0">
-              <a
-                href={n.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm hover:text-[var(--color-primary)] transition-colors"
-              >
-                {n.title}
-              </a>
+              <span className="text-sm">{n.title}</span>
               <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
                 {n.board_name} · {n.author}
               </p>
             </div>
+            <span className="text-xs text-[var(--color-text-muted)] shrink-0">
+              {expanded === i ? "접기" : n.body ? "펼치기" : "링크"}
+            </span>
           </div>
+          {expanded === i && n.body && (
+            <div className="mt-2 ml-24 text-xs text-[var(--color-text-muted)] whitespace-pre-wrap bg-[var(--color-bg)] rounded p-3 border border-[var(--color-border)]">
+              {n.body}
+              {n.attachments && n.attachments.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-[var(--color-border)]">
+                  <span className="font-medium">첨부: </span>
+                  {n.attachments.map((a, j) => (
+                    <a key={j} href={a.url} target="_blank" rel="noopener noreferrer" className="text-[var(--color-primary)] hover:underline mr-2">
+                      {a.name}
+                    </a>
+                  ))}
+                </div>
+              )}
+              <div className="mt-2 pt-2 border-t border-[var(--color-border)]">
+                <a href={n.url} target="_blank" rel="noopener noreferrer" className="text-[var(--color-primary)] hover:underline">
+                  eClass에서 보기
+                </a>
+              </div>
+            </div>
+          )}
+          {expanded === i && !n.body && (
+            <div className="mt-2 ml-24 text-xs text-[var(--color-text-muted)]">
+              본문 없음 —{" "}
+              <a href={n.url} target="_blank" rel="noopener noreferrer" className="text-[var(--color-primary)] hover:underline">
+                eClass에서 보기
+              </a>
+            </div>
+          )}
         </li>
       ))}
     </ul>
@@ -208,17 +237,30 @@ function AssignmentsTab({ data }: { data: CourseDetailType }) {
 function MaterialsTab({ data }: { data: CourseDetailType }) {
   if (!data.materials.length)
     return <p className="text-[var(--color-text-muted)]">다운로드된 자료 없음</p>;
+
+  const ext = (name: string) => {
+    const e = name.split(".").pop()?.toUpperCase();
+    return e || "FILE";
+  };
+
   return (
     <ul className="space-y-2">
       {data.materials.map((m, i) => (
         <li key={i} className="flex items-center gap-3 text-sm py-2 border-b border-[var(--color-border)]">
-          <span className="text-[var(--color-primary)]">
-            {m.filename.endsWith(".pdf") ? "PDF" : m.filename.endsWith(".pptx") ? "PPT" : "FILE"}
+          <span className="text-[var(--color-primary)] text-xs font-medium w-10 text-center shrink-0">
+            {ext(m.filename)}
           </span>
-          <span className="flex-1">{m.filename}</span>
-          <span className="text-[var(--color-text-muted)] text-xs">
+          <span className="flex-1 truncate">{m.filename}</span>
+          <span className="text-[var(--color-text-muted)] text-xs shrink-0">
             {m.size_kb > 1024 ? `${(m.size_kb / 1024).toFixed(1)}MB` : `${m.size_kb}KB`}
           </span>
+          <a
+            href={`/api/courses/${encodeURIComponent(data.short_name)}/download/${encodeURIComponent(m.filename)}`}
+            download
+            className="text-[var(--color-primary)] hover:underline text-xs shrink-0"
+          >
+            다운로드
+          </a>
         </li>
       ))}
     </ul>
