@@ -1,88 +1,119 @@
 # school_sync 검수 결과 — 이슈 트래커
 
-> 2026-03-05 전체 검수 후 작성. 해결된 항목은 체크 표시.
+> 2026-03-05 전체 검수, 2026-03-17 웹 감사 + 전체 리팩토링 + 심층 감사 완료.
 
 ---
 
-## 즉시 수정 완료 (P0)
+## 심층 감사 (2026-03-17) — P0 즉시 수정
 
-- [x] **materials.py NameError** — `total` 변수가 할당 전에 사용되어 다운로드 기능 크래시. `total = len(results)`를 `success` 계산 전으로 이동, 미사용 `skipped` 제거.
-- [x] **QUESTION_CATEGORY_MAP 키워드 부족** — "캘린더", "퀴즈", "시험", "휴강", "보강", "공모전", "특강", "실습", "레포트", "종강", "방학" 등 빈번한 질문 유형 추가. 15개 → 33개.
-- [x] **briefing 항상 포함** — 모든 질문에 briefing.md가 컨텍스트에 포함되어 토큰 낭비. syllabus/profile만 물어볼 때는 제외하도록 `_BRIEFING_RELEVANT` 조건 추가.
-
----
-
-## P1: 높은 우선순위 — 전부 해결
-
-- [x] **1. extractor에 timeout 미설정** — 6개 파일(scanner, syllabus, notices, materials, portal, department)의 모든 `page.goto()`에 `timeout=_GOTO_TIMEOUT`(30초) 추가. `config.REQUEST_TIMEOUT` 기반.
-- [x] **2. Notice.date 형식 불일치** — `_normalize_date()` 함수 추가. `YYYY.MM.DD`, `YY.MM.DD`, `YYYY/MM/DD` 등을 모두 `YYYY-MM-DD` ISO로 변환. eclass/portal/department 3곳 Notice 생성에 적용.
-- [x] **3. calendar.py 응답 검증 부족** — JSON 파싱 실패 시 빈 리스트 반환, 비정상 응답 형식/API 에러 시 경고 로그 출력 후 빈 리스트 반환.
-- [x] **4. assignments sections 순회 누락** — `normalize_assignments()`에서 `activities_data.get("sections", [])` 내부 활동도 순회. URL 기반 중복 제거 포함.
+- [x] **useLogStream 콜백 무한루프** — `onStreamEnd` 인라인 함수가 매 렌더마다 재생성되어 `startLogStream` → `fetchTaskStatus` → 무한 리렌더. **ref 기반 콜백**으로 수정하여 안정적 참조 유지.
+- [x] **ask 세션 격리 미흡** — 글로벌 `_sessions` 딕셔너리에서 `session_id`만으로 세션 관리하여 타 유저 대화 열람 가능. **`{username}:{session_id}`** 스코핑 적용.
+- [x] **파일 업로드 메모리 고갈 (DoS)** — 전체 파일을 메모리에 읽은 뒤 크기 검증. **256KB 청크 단위 읽기 + 누적 크기 검증**으로 변경.
+- [x] **course_filter 플래그 주입** — `--course` 뒤에 `--site` 등 임의 플래그 주입 가능. **정규식 화이트리스트 + `--` prefix 차단** 적용.
+- [x] **PII(전화/이메일) LLM 전송** — `student.json`의 phone/email이 LLM 컨텍스트에 포함. **`_load_context`에서 student 데이터 로드 시 PII 필드 제거** 적용.
 
 ---
 
-## P2: 중간 우선순위 — 일부 해결
+## 심층 감사 (2026-03-17) — P1 수정
 
-- [ ] **5. HTML 파싱 취약 — portal/department** — `.board_list ul li`, `cells[2]` 등 특정 구조 종속. fallback 셀렉터 추가 필요.
-- [ ] **6. "강의" 키워드 과매칭** — `syllabus + schedule` 둘 다 로드됨. 2차 분류 로직 도입 필요.
-- [x] **7. system prompt에 timetable 형식 예시 없음** — schedule 필드의 자연어 형식(`"월 5교시(13:00) ~ 6.5교시(15:00)"`) 예시와 요일 필터 설명 추가.
-- [x] **8. max_tokens 2048 제한** — `max_tokens=4096`으로 증가.
-- [ ] **9. TimetableEntry 모델 미사용** — Pydantic 모델 있으나 실제로는 dict 리스트 사용. 스키마 정리 필요.
-- [x] **10. 하드코딩된 설정값** — portal `schedule_info_seq`, department 게시판 목록을 `config.yaml`로 이전. 코드에서 config 기반 참조로 변경.
-
----
-
-## P3: 낮은 우선순위 — 미착수
-
-- [ ] **11. browser.py 컨텍스트 매니저 미구현** — `__aenter__`/`__aexit__` 구현 필요.
-- [ ] **12. cache.py 동시 접근 문제** — 잠금 없음. 단일 실행이라 실질 영향 없음.
-- [ ] **13. cache.py `is_file_downloaded` 데드 코드** — 제거 또는 활용.
-- [ ] **14. GradeItem.range 필드명** — Python 내장 `range`와 이름 충돌 가능. `score_range` 등으로 변경.
-- [ ] **15. NormalizedOutput에 syllabus 미포함** — 별도 저장이라 현행 유지 가능.
-- [ ] **16. --refresh 의미 혼동** — help 텍스트 보완.
-- [ ] **17. syllabus 데이터 품질** — 1주차 topic 중복, overview 이스케이프 잔여.
+- [x] **DEV_MODE 프로덕션 누출** — `DEV_MODE=1`이 프로덕션에 남으면 전체 인증 우회. **`SYOPS_SECRET_KEY`와 동시 설정 시 경고 로그** 출력.
+- [x] **ask SSE 에러 정보 노출** — `str(e)`에 API 키/내부 경로 포함 가능. **일반 에러 메시지만 클라이언트 반환**, 상세는 서버 로그에 기록.
+- [x] **sync 라우터 HTTP 200 에러** — 에러 상황에서 HTTP 200 반환. **HTTPException(400/409)** 으로 적절한 상태코드 사용.
+- [x] **과목 서브스트링 매칭** — `course_name in d.name` 패턴으로 "AI" → "AI응용" 매칭. `routes/courses.py`와 `data_loader.py`에서 **정확 매칭(`==`)**으로 변경.
+- [x] **main.py 상대경로** — `Path("output")` 하드코딩 → `OUTPUT_DIR` 사용.
+- [x] **캘린더 타임존 누락** — `datetime(year, 3, 1)` naive datetime으로 Docker(UTC)에서 9시간 오차. **KST timezone-aware datetime** 적용.
+- [x] **대화 히스토리 corruption** — API 호출 전에 user 메시지 추가하여 실패 시 `[user, user]` 비정상 구조. **API 성공 후에만 양쪽 메시지 추가**.
+- [x] **ask_engine.py 로드 실패 시 앱 크래시** — try-except로 감싸고, 실패 시 **graceful fallback** (해당 기능만 비활성화).
+- [x] **department.py dead code** — `offset = cells.length >= 5 ? 0 : 0` 양 분기 0. 삭제.
+- [x] **datetime.utcnow() deprecated** — `data_loader.py`, `auto_sync.py`에서 `datetime.now(timezone.utc)` 사용으로 변경.
+- [x] **Anthropic 클라이언트 매 요청 생성** — 모듈 레벨 싱글턴 `_get_client()`로 커넥션 풀 재사용.
 
 ---
 
-## 추가 작업 완료 (v1.1)
+## 이전 이슈 — P0 (전부 해결)
 
-- [x] **ask.py 웹검색 연동** — Anthropic 빌트인 `web_search_20250305` 도구 추가. 로컬 데이터 부족 시 자동 웹검색. `--no-search` 옵션.
-- [x] **토큰 예산 관리** — `MAX_CONTEXT_CHARS=30,000` 제한. 파일별 우선순위(5~50)로 정렬하여 중요 데이터 우선 로드.
-- [x] **스마트 필터링** — notices(과목별/최근 7일), attendance(결석/지각/조퇴/유고결석, 빈 결과 시 전체 폴백), grades(과목별), academic_schedule(향후 30일).
-- [x] **system prompt 하이브리드 모드** — 로컬 데이터 우선 + 웹검색 보완. 출처 구분(`[출처: 시간표]` vs `[출처: 웹검색]`).
-- [x] **미사용 import 제거** — ask.py에서 `re`, `Path` 제거.
+- [x] **materials.py NameError** — `total` 변수 할당 전 사용
+- [x] **QUESTION_CATEGORY_MAP 키워드 부족** — 15개 → 33개
+- [x] **briefing 항상 포함** — `_BRIEFING_RELEVANT` 조건 추가
+
+## 이전 이슈 — P1 (전부 해결)
+
+- [x] **extractor timeout 미설정** — 6개 파일에 `_GOTO_TIMEOUT` 적용
+- [x] **Notice.date 형식 불일치** — `_normalize_date()` 추가
+- [x] **calendar.py 응답 검증** — JSON 파싱 실패 방어
+- [x] **assignments sections 순회 누락** — URL 기반 중복 제거
+
+## 이전 이슈 — P2 (전부 해결)
+
+- [x] **HTML 파싱 취약** — portal/department fallback 셀렉터 3단계
+- [x] **"강의" 키워드 과매칭** — 2차 분류 로직
+- [x] **system prompt timetable 예시** — 형식 예시 추가
+- [x] **max_tokens 2048** → 4096
+- [x] **TimetableEntry 모델 미사용** → Pydantic 모델 적용
+- [x] **하드코딩 설정값** → config.yaml 기반
+
+## 이전 이슈 — P3 (전부 해결)
+
+- [x] **browser.py 컨텍스트 매니저** — `__aenter__`/`__aexit__`
+- [x] **cache.py 동시 접근** — 원자적 쓰기 (tempfile→rename)
+- [x] **cache.py 데드코드** — `is_file_downloaded` 제거
+- [x] **GradeItem.range** → `score_range`
+- [x] **NormalizedOutput syllabus** — SyllabusEntry 모델 갱신 + 통합
+- [x] **--refresh 도움말** — 명확화
+- [x] **syllabus 데이터 품질** — 주차 중복 제거, HTML 이스케이프 정리
+
+## 웹 리팩토링 (전부 해결)
+
+- [x] **ask.py sys.path.insert** → ask_engine.py 브릿지
+- [x] **SSE 코드 중복** → useLogStream 훅
+- [x] **auto_sync 반응 지연** — 60초 체크 + 비활성 분리
+- [x] **Error Boundary** — 전체+라우트별
+- [x] **tasks.py 멀티 워커** — 경고 로직
+- [x] **docker-compose 리소스** — 2G/1.5CPU 제한
+- [x] **data_loader.py 과목 필터** — `in` → `==` 정확 매칭
+- [x] **ask.py 질문 길이/히스토리** — 2000자/20턴 제한
+- [x] **auth.py mtime 캐시** — 파일 변경 시만 재로드
+- [x] **gdrive 경로 검증** — `_validate_course()` 추가
+- [x] **docker-compose healthcheck** — 60초 간격
+
+## SyOps 연동 (해결)
+
+- [x] **nginx study.conf** — SSE 버퍼링 off 포함
 
 ---
 
-## 웹 서비스 감사 (2026-03-17)
+## 미해결 (P2-P3, 장기 개선)
 
-> StudyHub 전체 코드 감사. 백엔드 9개 라우터 + 프론트엔드 6페이지 + Docker 설정.
+### P2 — 계획적으로 수정
 
-### 즉시 수정 완료
+- [ ] **캐시 매번 전체 I/O (O(n²))** — `cache.py`의 `is_new_or_updated`/`mark_collected`가 매 호출마다 전체 파일 읽기/쓰기. 배치 context manager 패턴으로 변환 필요.
+- [ ] **CORS allow_methods/allow_headers 과도** — `["*"]` 대신 실제 사용 메서드/헤더만 명시.
+- [ ] **GDrive 토큰 비원자적 쓰기** — 토큰 갱신 시 `write_text` 직접 사용. 임시 파일 + rename으로 변경.
+- [ ] **`_save_json` 헬퍼 4곳 중복** — 공통 유틸 모듈로 추출.
+- [ ] **`_GOTO_TIMEOUT` 6곳 중복** — `config.py`에 `GOTO_TIMEOUT_MS` 상수 추가.
+- [ ] **Windows 인코딩 우회 코드 2곳 중복** — 공통 함수로 추출.
+- [ ] **data_loader 매번 디스크 I/O** — mtime 기반 캐시 도입.
+- [ ] **normalizer.py 과도한 책임 (759줄)** — 변환/저장/출력 분리.
+- [ ] **config.py 모듈 레벨 사이드 이펙트** — lazy loading 또는 `get_config()` 패턴.
+- [ ] **ndrims_grade_history NormalizedOutput 미포함** — 모델과 실제 출력 불일치.
 
-- [x] **data_loader.py 과목 필터 불일치** — `notices`와 `deadlines`가 `in`(부분 매칭)을 사용해 "자료" 요청 시 "자료구조" 데이터까지 노출. `_filter_by_course()` (`==` 정확 매칭)로 통일.
-- [x] **ask.py 질문 길이/히스토리 무제한** — 질문 최대 2,000자 제한 + 히스토리 최근 20턴만 유지. API 비용 폭증 방지.
-- [x] **auth.py permissions 매 요청 파일 I/O** — `load_permissions()`가 매 요청마다 YAML 파싱. mtime 기반 캐시 도입 — 파일 변경 시만 재로드.
-- [x] **gdrive 라우트 과목명 경로 검증 부재** — `body.course`를 검증 없이 경로에 사용. `_validate_course()` 추가 (정규식 + `..` 차단).
-- [x] **docker-compose healthcheck 미설정** — `/api/health` 엔드포인트 활용 healthcheck 추가 (60초 간격).
+### P3 — 개선 권장
 
-### 미해결: 리팩토링 필요 (시간 있을 때)
+- [ ] **asyncio.create_task() 참조 미보관** — done_callback 패턴 사용.
+- [ ] **tasks.py env=None 전체 환경변수 상속** — 최소 권한 원칙.
+- [ ] **health 엔드포인트 last_crawl 노출** — 인증 필요 엔드포인트로 분리.
+- [ ] **ndrims.py 미사용 변수 total_entries** — 제거.
+- [ ] **browser.py dialog handler 미제거** — 이후 탐색에 영향.
+- [ ] **calendar.py 미사용 import time** — 제거.
+- [ ] **URL 없는 포탈 공지 중복 가능** — dedup 로직 보완.
+- [ ] **크롤러 간 에러 구조 불일치** — 통일된 에러 포맷.
+- [ ] **BaseCrawler.requires_auth() 미사용** — 호출하거나 제거.
+- [ ] **auto_sync 시간 드리프트** — 루프마다 현재 시각 재계산.
 
-- [ ] **ask.py `sys.path.insert` 제거** — 모듈 레벨에서 프로젝트 루트를 sys.path에 삽입하여 `ask.py`를 import. `ask.py`를 패키지화(`web/ask_engine.py` 등)하거나 `web/routes/ask.py`에서 상대 import로 변경 권장.
-- [ ] **SSE 클라이언트 코드 중복 (프론트엔드)** — `SyncControl.tsx`와 `LessonAssist.tsx`에 SSE 스트리밍 코드 약 50줄이 거의 동일. `useLogStream` 커스텀 훅으로 추출.
-- [ ] **auto_sync.py 비활성화 반응 지연** — `asyncio.sleep(6시간)` 후에야 `_enabled` 체크. 짧은 간격(60초)으로 깨어나서 시간 기반 판단으로 변경하면 토글 즉시 반영.
-- [ ] **React Error Boundary 미적용** — 렌더링 에러 시 전체 앱 흰 화면. 라우트별 ErrorBoundary 추가 권장.
-- [ ] **tasks.py 단일 워커 전제** — 모듈 글로벌 `_state`. uvicorn 멀티 워커 시 태스크 중복 실행 가능. 현재 단일 워커이므로 문제없으나 스케일업 시 주의.
-- [ ] **docker-compose 리소스 제한 미설정** — 메모리/CPU 제한 없음. Playwright 크롤링이 리소스 과다 소비할 수 있음.
+### Future
 
----
-
-## 장기 개선 (Future)
-
-- **nDRIMS SSO 자동 로그인**: 현재 수동 로그인 필수. credential 기반 자동화 또는 세션 재활용
-- **HTML 스냅샷 기반 단위 테스트**: extractor별 테스트 케이스 추가
-- **시간표 구조화**: 자연어 → `day_of_week/start_time/end_time` 파싱
-- **공지 본문 크롤링**: portal 공지도 본문 수집
+- **SyOps JWT 인증 통합**: permissions.yaml → JWT + 서비스 권한
+- **nDRIMS SSO 자동 로그인**: credential 기반 자동화
+- **HTML 스냅샷 기반 단위 테스트**: extractor별 테스트
+- **시간표 구조화**: 자연어 → day/start/end 파싱
 - **MCP 서버 전환**: The_Agent 연동 시
-- **ask.py 2차 분류 로직**: 키워드 조합 기반 정밀 분류로 토큰 최적화
-- **web_search_20260209 업그레이드**: 모델 업그레이드 시 dynamic filtering 적용으로 토큰 절감

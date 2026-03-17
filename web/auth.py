@@ -90,6 +90,11 @@ async def require_auth(
 ) -> dict:
     """JWT 인증. Bearer 헤더 → 쿠키 → DEV_MODE 순으로 시도."""
     if os.getenv("DEV_MODE") == "1":
+        if os.getenv("SYOPS_SECRET_KEY"):
+            import logging
+            logging.getLogger("studyhub.auth").warning(
+                "DEV_MODE=1이지만 SYOPS_SECRET_KEY도 설정됨 — 프로덕션 환경에서 DEV_MODE를 비활성화하세요"
+            )
         return {"sub": "dev", "role": "admin", "username": "dev", "permissions": list(ALL_PERMISSIONS)}
 
     resolved_token = token or syops_token

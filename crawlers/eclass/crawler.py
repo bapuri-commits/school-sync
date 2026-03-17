@@ -4,7 +4,6 @@ BaseCrawler 인터페이스로 감싼 클래스.
 """
 
 import asyncio
-import json
 import re
 import traceback
 from datetime import datetime
@@ -12,6 +11,7 @@ from pathlib import Path
 
 from browser import BrowserSession
 from config import CURRENT_SEMESTER, REQUEST_DELAY, OUTPUT_DIR
+from utils import save_json
 
 from crawlers.base import BaseCrawler
 from crawlers.eclass.scanner import scan_course, CourseScan
@@ -43,11 +43,6 @@ def _sanitize_filename(name: str) -> str:
     name = re.sub(r'[<>:"/\\|?*]', '', name)
     name = re.sub(r'\s+', '_', name).strip('_')
     return name[:80]
-
-
-def _save_json(data: dict, path: Path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _filter_courses(courses: list[dict], filters: list[str]) -> list[dict]:
@@ -132,7 +127,7 @@ class EclassCrawler(BaseCrawler):
             "scanned_at": datetime.now().isoformat(),
             "courses": {str(cid): s.to_dict() for cid, s in scans.items()},
         }
-        _save_json(scan_output, RAW_DIR / "scan_result.json")
+        save_json(scan_output, RAW_DIR / "scan_result.json")
 
         if scan_only:
             print(f"\n  스캔 결과 저장: {RAW_DIR / 'scan_result.json'}")
@@ -170,7 +165,7 @@ class EclassCrawler(BaseCrawler):
                     "extracted_at": datetime.now().isoformat(),
                     **data,
                 }
-                _save_json(course_output, COURSES_DIR / filename)
+                save_json(course_output, COURSES_DIR / filename)
                 print(f"  -> 저장: courses/{filename}")
 
             except Exception as e:
@@ -187,7 +182,7 @@ class EclassCrawler(BaseCrawler):
             "courses": course_data,
         }
         full_path = RAW_DIR / f"{CURRENT_SEMESTER}_semester.json"
-        _save_json(full_result, full_path)
+        save_json(full_result, full_path)
 
         print(f"\n{'='*60}")
         print(f"  완료!")

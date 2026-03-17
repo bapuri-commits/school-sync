@@ -1,23 +1,20 @@
 """캘린더/일정 추출. AJAX API가 동작하는 유일한 기능."""
 
-import time
+from datetime import datetime, timezone, timedelta
+
 import httpx
 from config import BASE_URL, REQUEST_TIMEOUT, CURRENT_SEMESTER
 
-
+_KST = timezone(timedelta(hours=9))
 AJAX_ENDPOINT = f"{BASE_URL}/lib/ajax/service.php"
 
 
 def _semester_start_timestamp() -> int:
-    """현재 학기 시작일의 Unix timestamp를 반환한다."""
+    """현재 학기 시작일의 Unix timestamp를 반환한다 (KST 기준)."""
     year = int(CURRENT_SEMESTER.split("-")[0])
     sem = int(CURRENT_SEMESTER.split("-")[1])
-    if sem == 1:
-        import datetime
-        return int(datetime.datetime(year, 3, 1).timestamp())
-    else:
-        import datetime
-        return int(datetime.datetime(year, 9, 1).timestamp())
+    month = 3 if sem == 1 else 9
+    return int(datetime(year, month, 1, tzinfo=_KST).timestamp())
 
 
 async def extract_calendar_events(cookies: dict, sesskey: str) -> list[dict]:

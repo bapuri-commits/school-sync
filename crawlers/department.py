@@ -4,26 +4,18 @@
 """
 
 import asyncio
-import json
-from pathlib import Path
 
 from browser import BrowserSession
-from config import OUTPUT_DIR, SITES, REQUEST_DELAY, REQUEST_TIMEOUT
-
-_GOTO_TIMEOUT = int(REQUEST_TIMEOUT * 1000)
+from config import OUTPUT_DIR, SITES, REQUEST_DELAY, GOTO_TIMEOUT_MS
 from crawlers.base import BaseCrawler
-from cache import is_new_or_updated, mark_collected, content_hash
+from cache import CacheBatch, content_hash
+from utils import save_json
 
 RAW_DIR = OUTPUT_DIR / "raw" / "department"
 DL_DIR = OUTPUT_DIR / "downloads" / "department"
 
 _dept_cfg = SITES.get("department", {})
 BASE_URL = _dept_cfg.get("base_url", "https://ai.dongguk.edu")
-
-
-def _save_json(data, path: Path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 class DepartmentCrawler(BaseCrawler):
@@ -52,7 +44,7 @@ class DepartmentCrawler(BaseCrawler):
                 print(f"  [에러] {label} 추출 실패: {e}")
                 result[key] = {"_error": str(e)}
 
-        _save_json(result, RAW_DIR / "notices.json")
+        save_json(result, RAW_DIR / "notices.json")
         for b in boards:
             key, label = b["key"], b["label"]
             count = len(result.get(key, []))
@@ -68,25 +60,45 @@ class DepartmentCrawler(BaseCrawler):
         all_posts = []
         for page_idx in range(1, max_pages + 1):
             url = f"{BASE_URL}/article/{board_path}/list?pageIndex={page_idx}"
-            await page.goto(url, wait_until="networkidle", timeout=_GOTO_TIMEOUT)
+            await page.goto(url, wait_until="networkidle", timeout=GOTO_TIMEOUT_MS)
 
             posts = await page.evaluate("""
                 () => {
                     const posts = [];
-                    document.querySelectorAll('table tbody tr').forEach(tr => {
-                        const cells = tr.querySelectorAll('td');
-                        if (cells.length < 3) return;
 
-                        const linkEl = tr.querySelector('a[href*="detail"]');
+                    // 1차: 테이블 기반
+                    let rows = document.querySelectorAll('table tbody tr');
+                    // 2차 fallback: 대체 테이블 구조
+                    if (rows.length === 0) rows = document.querySelectorAll('.board_table tbody tr, .bbs_list tbody tr');
+                    // 3차 fallback: 리스트 기반
+                    if (rows.length === 0) rows = document.querySelectorAll('.board_list ul li, .notice_list li');
+
+                    rows.forEach(el => {
+                        const cells = el.querySelectorAll('td');
+                        const linkEl = el.querySelector('a[href*="detail"], a[href*="view"]');
                         const title = linkEl ? linkEl.innerText.trim() : '';
                         if (!title) return;
+
+                        let author = '', date = '', views = '';
+                        if (cells.length >= 3) {
+                            author = cells.length > 2 ? cells[2].innerText.trim() : '';
+                            date = cells.length > 3 ? cells[3].innerText.trim() : '';
+                            views = cells.length > 4 ? cells[4].innerText.trim() : '';
+                        } else {
+                            // 리스트: 텍스트에서 날짜/조회수 추출
+                            const text = el.innerText;
+                            const dateMatch = text.match(/(\\d{4}[.\\-]\\d{2}[.\\-]\\d{2})/);
+                            date = dateMatch ? dateMatch[1] : '';
+                            const viewMatch = text.match(/조회\\s*(\\d[\\d,]*)/);
+                            views = viewMatch ? viewMatch[1].replace(/,/g, '') : '';
+                        }
 
                         posts.push({
                             title: title,
                             url: linkEl ? linkEl.href : '',
-                            author: cells.length > 2 ? cells[2].innerText.trim() : '',
-                            date: cells.length > 3 ? cells[3].innerText.trim() : '',
-                            views: cells.length > 4 ? cells[4].innerText.trim() : '',
+                            author: author,
+                            date: date,
+                            views: views,
                         });
                     });
                     return posts;
@@ -106,15 +118,16 @@ class DepartmentCrawler(BaseCrawler):
                 unique.append(p)
 
         new_count = 0
-        for post in unique:
-            url = post.get("url", "")
-            date = post.get("date", "")
-            if url and is_new_or_updated(url, date):
-                body_data = await self._extract_post_body(page, url)
-                post["_body"] = body_data.get("body", "")
-                post["_attachments"] = body_data.get("attachments", [])
-                mark_collected(url, date, content_hash(post.get("_body", "")))
-                new_count += 1
+        with CacheBatch() as cache_batch:
+            for post in unique:
+                url = post.get("url", "")
+                date = post.get("date", "")
+                if url and cache_batch.is_new_or_updated(url, date):
+                    body_data = await self._extract_post_body(page, url)
+                    post["_body"] = body_data.get("body", "")
+                    post["_attachments"] = body_data.get("attachments", [])
+                    cache_batch.mark_collected(url, date, content_hash(post.get("_body", "")))
+                    new_count += 1
                 await asyncio.sleep(REQUEST_DELAY)
 
         if new_count > 0:
@@ -125,7 +138,7 @@ class DepartmentCrawler(BaseCrawler):
     async def _extract_post_body(self, page, detail_url: str) -> dict:
         """글 상세 페이지에서 본문과 첨부파일을 추출한다."""
         try:
-            await page.goto(detail_url, wait_until="networkidle", timeout=_GOTO_TIMEOUT)
+            await page.goto(detail_url, wait_until="networkidle", timeout=GOTO_TIMEOUT_MS)
 
             data = await page.evaluate("""
                 () => {

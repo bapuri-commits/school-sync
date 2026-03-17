@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 import json
-import sys
 import time
 from collections import OrderedDict
-from pathlib import Path
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..auth import require_permission
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from ask import _build_system_prompt, _classify_question, _load_context, WEB_SEARCH_TOOL
+from ..ask_engine import _build_system_prompt, _classify_question, _load_context, WEB_SEARCH_TOOL
 
 router = APIRouter()
 
@@ -25,6 +21,16 @@ MAX_QUESTION_LEN = 2000
 MAX_HISTORY_TURNS = 20
 
 _sessions: OrderedDict[str, dict] = OrderedDict()
+
+_anthropic_client = None
+
+
+def _get_client():
+    global _anthropic_client
+    if _anthropic_client is None:
+        from anthropic import Anthropic
+        _anthropic_client = Anthropic()
+    return _anthropic_client
 
 
 class AskRequest(BaseModel):
@@ -54,9 +60,10 @@ def _get_history(session_id: str) -> list[dict]:
 
 async def _stream_response(question: str, history: list[dict], web_search: bool):
     """Anthropic API를 호출하고 SSE 형식으로 스트리밍한다."""
-    from anthropic import Anthropic
+    import logging
+    log = logging.getLogger("studyhub.ask")
 
-    client = Anthropic()
+    client = _get_client()
 
     categories = _classify_question(question)
     context = _load_context(categories, question)
@@ -66,14 +73,13 @@ async def _stream_response(question: str, history: list[dict], web_search: bool)
         return
 
     system = _build_system_prompt(web_search_enabled=web_search) + "\n\n" + context
-    history.append({"role": "user", "content": question})
 
     tools = [WEB_SEARCH_TOOL] if web_search else None
     kwargs = dict(
         model="claude-sonnet-4-20250514",
         max_tokens=4096,
         system=system,
-        messages=history,
+        messages=history + [{"role": "user", "content": question}],
     )
     if tools:
         kwargs["tools"] = tools
@@ -85,9 +91,11 @@ async def _stream_response(question: str, history: list[dict], web_search: bool)
                 full_text += text
                 yield f"data: {json.dumps({'type': 'text', 'text': text}, ensure_ascii=False)}\n\n"
 
+        history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": full_text})
     except Exception as e:
-        yield f"data: {json.dumps({'type': 'error', 'text': str(e)}, ensure_ascii=False)}\n\n"
+        log.exception("Ask API 호출 실패")
+        yield f"data: {json.dumps({'type': 'error', 'text': 'AI 응답 생성 중 오류가 발생했습니다.'}, ensure_ascii=False)}\n\n"
 
     yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
@@ -95,12 +103,11 @@ async def _stream_response(question: str, history: list[dict], web_search: bool)
 @router.post("/ask")
 async def ask(body: AskRequest, user: dict = Depends(require_permission("ask"))):
     if len(body.question) > MAX_QUESTION_LEN:
-        from fastapi.responses import JSONResponse
-        return JSONResponse(
-            {"detail": f"질문이 너무 깁니다 (최대 {MAX_QUESTION_LEN}자)"},
-            status_code=400,
-        )
-    history = _get_history(body.session_id)
+        from fastapi import HTTPException
+        raise HTTPException(400, f"질문이 너무 깁니다 (최대 {MAX_QUESTION_LEN}자)")
+    user_id = user.get("username", user.get("sub", "anon"))
+    scoped_sid = f"{user_id}:{body.session_id}"
+    history = _get_history(scoped_sid)
     if len(history) > MAX_HISTORY_TURNS * 2:
         del history[: len(history) - MAX_HISTORY_TURNS * 2]
     return StreamingResponse(
@@ -116,7 +123,8 @@ class ResetRequest(BaseModel):
 
 @router.post("/ask/reset")
 async def reset_session(body: ResetRequest = ResetRequest(), user: dict = Depends(require_permission("ask"))):
-    sid = body.session_id
-    if sid in _sessions:
-        del _sessions[sid]
-    return {"status": "ok", "session_id": sid}
+    user_id = user.get("username", user.get("sub", "anon"))
+    scoped_sid = f"{user_id}:{body.session_id}"
+    if scoped_sid in _sessions:
+        del _sessions[scoped_sid]
+    return {"status": "ok", "session_id": body.session_id}

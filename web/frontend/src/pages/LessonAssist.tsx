@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLogStream } from "../hooks/useLogStream";
 
 interface DagloFile {
   filename: string;
@@ -22,24 +23,11 @@ interface PackageCourse {
   files: PackageFile[];
 }
 
-interface TaskStatus {
-  status: "idle" | "running" | "completed" | "failed";
-  task_type: string;
-  started_at: string;
-  finished_at: string;
-  exit_code: number | null;
-}
-
 interface CourseInfo {
   materials: { filename: string; size_kb: number }[];
   hasContext: boolean;
   lastCrawl: string | null;
 }
-
-type SSEChunk =
-  | { type: "log"; text: string }
-  | { type: "status"; status: string; exit_code: number | null }
-  | { type: "done" };
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -57,9 +45,6 @@ export default function LessonAssist() {
   const [uploading, setUploading] = useState(false);
   const [uploadCourse, setUploadCourse] = useState("auto");
   const [uploadDate, setUploadDate] = useState("");
-  const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null);
-  const [logs, setLogs] = useState<string[]>([]);
-  const [streaming, setStreaming] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [courseInfo, setCourseInfo] = useState<CourseInfo | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -67,15 +52,23 @@ export default function LessonAssist() {
   const [uploadingToDrive, setUploadingToDrive] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
+
+  const fetchPackages = useCallback(async () => {
+    try {
+      const r = await fetch("/api/la/packages");
+      if (r.ok) setPackages((await r.json()).packages || []);
+    } catch { /* ignore */ }
+  }, []);
+
+  const { logs, streaming, taskStatus, startLogStream, clearLogs, abort, fetchTaskStatus } =
+    useLogStream({ onStreamEnd: fetchPackages });
 
   const fetchCourses = useCallback(async () => {
     try {
       const r = await fetch("/api/la/courses");
       if (r.ok) {
         const data = await r.json();
-        const list: string[] = data.courses || [];
-        setCourseList(list);
+        setCourseList(data.courses || []);
         setFetchError(null);
       } else if (r.status === 401) {
         setFetchError("인증이 필요합니다");
@@ -89,13 +82,6 @@ export default function LessonAssist() {
     try {
       const r = await fetch("/api/la/files");
       if (r.ok) setDagloFiles((await r.json()).courses || []);
-    } catch { /* ignore — fetchCourses handles connection errors */ }
-  }, []);
-
-  const fetchPackages = useCallback(async () => {
-    try {
-      const r = await fetch("/api/la/packages");
-      if (r.ok) setPackages((await r.json()).packages || []);
     } catch { /* ignore */ }
   }, []);
 
@@ -120,22 +106,12 @@ export default function LessonAssist() {
     fetchCourses();
     fetchFiles();
     fetchPackages();
-    const checkStatus = async () => {
-      try {
-        const r = await fetch("/api/sync/status");
-        if (r.ok) {
-          const data = await r.json();
-          setTaskStatus(data);
-          if (data.status === "running") startLogStream();
-        }
-      } catch { /* ignore */ }
-    };
-    checkStatus();
+    fetchTaskStatus();
     fetch("/api/gdrive/status").then(r => r.ok ? r.json() : null).then(d => {
       if (d) setGdriveEnabled(d.enabled);
     }).catch(() => {});
-    return () => { abortRef.current?.abort(); };
-  }, [fetchCourses, fetchFiles, fetchPackages]);
+    return () => { abort(); };
+  }, [fetchCourses, fetchFiles, fetchPackages, fetchTaskStatus, abort]);
 
   useEffect(() => {
     if (uploadCourse) fetchCourseInfo(uploadCourse);
@@ -208,61 +184,8 @@ export default function LessonAssist() {
     handleUpload(e.dataTransfer.files);
   };
 
-  const startLogStream = async () => {
-    abortRef.current?.abort();
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setStreaming(true);
-    const pending: string[] = [];
-    let flushTimer: ReturnType<typeof setInterval> | null = null;
-
-    const flush = () => {
-      if (pending.length > 0) {
-        const batch = pending.splice(0);
-        setLogs((prev) => [...prev, ...batch]);
-      }
-    };
-    flushTimer = setInterval(flush, 200);
-
-    try {
-      const res = await fetch("/api/sync/logs/stream", { signal: ctrl.signal });
-      if (!res.body) { setStreaming(false); return; }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop()!;
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const chunk: SSEChunk = JSON.parse(line.slice(6));
-            if (chunk.type === "log") {
-              pending.push(chunk.text);
-            } else if (chunk.type === "status") {
-              setTaskStatus((prev) =>
-                prev ? { ...prev, status: chunk.status as TaskStatus["status"], exit_code: chunk.exit_code } : prev
-              );
-            }
-          } catch { /* skip */ }
-        }
-      }
-    } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") return;
-    } finally {
-      if (flushTimer) clearInterval(flushTimer);
-      flush();
-    }
-    setStreaming(false);
-    fetchPackages();
-  };
-
   const triggerPack = async (course?: string) => {
-    setLogs([]);
+    clearLogs();
     try {
       const body = course ? { course } : { all_courses: true };
       const r = await fetch("/api/sync/pack", {
@@ -270,15 +193,15 @@ export default function LessonAssist() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await r.json();
-      if (data.error) {
-        setLogs([`[오류] ${data.error}`]);
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        alert(data.detail || data.error || `HTTP ${r.status}`);
         return;
       }
       await new Promise((r) => setTimeout(r, 300));
       startLogStream();
     } catch (e) {
-      setLogs([`[연결 오류] ${e instanceof Error ? e.message : "unknown"}`]);
+      alert(e instanceof Error ? e.message : "연결 오류");
     }
   };
 

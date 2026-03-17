@@ -31,7 +31,15 @@ def _load_credentials(token_path: str) -> Credentials:
     creds = Credentials.from_authorized_user_file(str(path), SCOPES)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        path.write_text(creds.to_json(), encoding="utf-8")
+        import tempfile
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(creds.to_json())
+            Path(tmp).replace(path)
+        except Exception:
+            Path(tmp).unlink(missing_ok=True)
+            raise
         log.info("OAuth token refreshed")
 
     return creds

@@ -58,11 +58,14 @@ async def get_context(name: str, user: dict = Depends(require_permission("course
 
 
 def _find_course_dir(course_name: str) -> Path | None:
-    """과목명이 포함된 downloads 하위 디렉토리를 찾는다."""
+    """과목명과 정확히 일치하는 downloads 하위 디렉토리를 찾는다."""
     if not _DOWNLOADS_DIR.exists():
         return None
+    exact = _DOWNLOADS_DIR / course_name
+    if exact.is_dir():
+        return exact
     for d in _DOWNLOADS_DIR.iterdir():
-        if d.is_dir() and course_name in d.name:
+        if d.is_dir() and d.name == course_name:
             return d
     return None
 

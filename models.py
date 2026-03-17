@@ -85,7 +85,7 @@ class GradeItem(BaseModel):
     item_name: str
     score: str = "-"
     weight: str = "-"
-    range: str = ""
+    score_range: str = ""
     feedback: str = ""
 
 
@@ -93,7 +93,7 @@ class TimetableEntry(BaseModel):
     course_name: str
     course_code: str = ""
     professor: str = ""
-    schedule: str = ""              # "월2,3 수2" — 요일+교시 원본
+    schedule: str = ""              # "월 5교시(13:00) ~ 6.5교시(15:00)"
     room: str = ""
     credits: str = ""
     category: str = ""              # 전공선택, 교양 등
@@ -128,9 +128,28 @@ class AcademicSchedule(BaseModel):
     source_site: str = "portal"
 
 
+class SyllabusTextbook(BaseModel):
+    type: str                       # "주교재" | "부교재" | "참고교재"
+    title: str
+
+
+class SyllabusWeek(BaseModel):
+    week: int
+    topic: str
+
+
 class SyllabusEntry(BaseModel):
     course_name: str
-    fields: dict[str, str] = {}
+    professor: str = ""
+    email: str = ""
+    category: str = ""
+    class_type: str = ""
+    classroom: str = ""
+    office_hours: str = ""
+    overview: str = ""
+    objectives: str = ""
+    textbooks: list[SyllabusTextbook] = []
+    weekly_plan: list[SyllabusWeek] = []
 
 
 class NormalizedOutput(BaseModel):
@@ -147,4 +166,5 @@ class NormalizedOutput(BaseModel):
     timetable: list[TimetableEntry] = []
     academic_schedule: list[AcademicSchedule] = []
     syllabus: list[SyllabusEntry] = []
+    grade_history: list[dict] = []
     student_profile: StudentProfile | None = None

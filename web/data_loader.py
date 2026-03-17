@@ -15,13 +15,17 @@ _KST_OFFSET = timedelta(hours=9)
 
 
 def _now_kst() -> datetime:
-    return datetime.utcnow() + _KST_OFFSET
+    from datetime import timezone
+    return datetime.now(timezone.utc) + _KST_OFFSET
 
 
 def _today_kst() -> date:
     return _now_kst().date()
 
 _OUTPUT_DIR: Path | None = None
+
+_json_cache: dict[str, tuple[float, Any]] = {}
+_text_cache: dict[str, tuple[float, str]] = {}
 
 
 def init(output_dir: Path) -> None:
@@ -40,7 +44,13 @@ def _read_json(rel_path: str) -> Any:
     if not path.exists():
         return []
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        mtime = path.stat().st_mtime
+        cached = _json_cache.get(rel_path)
+        if cached and cached[0] == mtime:
+            return cached[1]
+        data = json.loads(path.read_text(encoding="utf-8"))
+        _json_cache[rel_path] = (mtime, data)
+        return data
     except (json.JSONDecodeError, OSError):
         return []
 
@@ -49,7 +59,16 @@ def _read_text(rel_path: str) -> str:
     path = _base() / rel_path
     if not path.exists():
         return ""
-    return path.read_text(encoding="utf-8")
+    try:
+        mtime = path.stat().st_mtime
+        cached = _text_cache.get(rel_path)
+        if cached and cached[0] == mtime:
+            return cached[1]
+        text = path.read_text(encoding="utf-8")
+        _text_cache[rel_path] = (mtime, text)
+        return text
+    except OSError:
+        return ""
 
 
 def courses() -> list[dict]:
@@ -112,7 +131,7 @@ def downloads_manifest(course_name: str) -> list[dict]:
     if not downloads_dir.exists():
         return []
     for d in downloads_dir.iterdir():
-        if d.is_dir() and course_name in d.name:
+        if d.is_dir() and d.name == course_name:
             manifest = d / "manifest.json"
             if manifest.exists():
                 try:
@@ -127,9 +146,9 @@ def context_markdown(course_name: str) -> str:
     ctx_dir = _base().parent / "context"
     if not ctx_dir.exists():
         return ""
-    for f in ctx_dir.iterdir():
-        if f.suffix == ".md" and course_name in f.stem:
-            return f.read_text(encoding="utf-8")
+    target = ctx_dir / f"{course_name}.md"
+    if target.is_file():
+        return target.read_text(encoding="utf-8")
     return ""
 
 

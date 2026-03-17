@@ -14,7 +14,7 @@ import asyncio
 import logging
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from . import tasks
 
@@ -70,7 +70,12 @@ async def auto_sync_loop():
 
     while True:
         try:
-            now_utc = datetime.utcnow()
+            if not _enabled:
+                _next_auto = None
+                await asyncio.sleep(60)
+                continue
+
+            now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
             next_run = _calc_next_run_utc(now_utc)
             wait_secs = (next_run - now_utc).total_seconds()
             _next_auto = _to_kst_iso(next_run)
@@ -78,7 +83,8 @@ async def auto_sync_loop():
             while wait_secs > 0:
                 chunk = min(wait_secs, 60)
                 await asyncio.sleep(chunk)
-                wait_secs -= chunk
+                now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+                wait_secs = (next_run - now_utc).total_seconds()
                 if not _enabled:
                     break
 
@@ -96,7 +102,7 @@ async def auto_sync_loop():
             if started:
                 while tasks.get_state().status == tasks.TaskStatus.RUNNING:
                     await asyncio.sleep(5)
-                _last_auto = _to_kst_iso(datetime.utcnow())
+                _last_auto = _to_kst_iso(datetime.now(timezone.utc).replace(tzinfo=None))
                 state = tasks.get_state()
                 logger.info(f"자동 동기화 완료: {state.status.value} (exit={state.exit_code})")
         except asyncio.CancelledError:

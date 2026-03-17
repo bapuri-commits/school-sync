@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -92,22 +93,28 @@ async def stream_logs(user: dict = Depends(require_permission("sync"))):
     )
 
 
+_COURSE_FILTER_RE = re.compile(r"^[\w가-힣\s\-_.()]+$")
+
+
 @router.post("/crawl")
 async def trigger_crawl(body: CrawlRequest, user: dict = Depends(require_permission("sync"))):
     valid_sites = {"eclass", "portal", "department", "ndrims"}
     sites = [s for s in body.sites if s in valid_sites]
     if not sites:
-        return {"error": "유효한 사이트가 없습니다", "valid": list(valid_sites)}
+        raise HTTPException(400, "유효한 사이트가 없습니다")
 
     cmd = [PYTHON, "main.py", "--site"] + sites
     if body.download:
         cmd.append("--download")
     if body.course_filter:
+        for f in body.course_filter:
+            if f.startswith("-") or not _COURSE_FILTER_RE.match(f):
+                raise HTTPException(400, f"유효하지 않은 과목 필터: {f}")
         cmd.extend(["--course"] + body.course_filter)
 
     started = await tasks.run_task("crawl", cmd)
     if not started:
-        return {"error": "이미 실행 중인 태스크가 있습니다", "status": tasks.get_state().to_dict()}
+        raise HTTPException(409, "이미 실행 중인 태스크가 있습니다")
     return {"status": "started", "command": cmd}
 
 
@@ -116,7 +123,7 @@ async def trigger_normalize(user: dict = Depends(require_permission("sync"))):
     cmd = [PYTHON, "main.py", "--normalize-only"]
     started = await tasks.run_task("normalize", cmd)
     if not started:
-        return {"error": "이미 실행 중인 태스크가 있습니다"}
+        raise HTTPException(409, "이미 실행 중인 태스크가 있습니다")
     return {"status": "started", "command": cmd}
 
 
@@ -171,5 +178,5 @@ async def trigger_pack(body: PackRequest, user: dict = Depends(require_permissio
 
     started = await tasks.run_chained_tasks("pack", steps, on_complete=on_complete)
     if not started:
-        return {"error": "이미 실행 중인 태스크가 있습니다"}
+        raise HTTPException(409, "이미 실행 중인 태스크가 있습니다")
     return {"status": "started", "steps": len(steps)}

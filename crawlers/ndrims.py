@@ -12,14 +12,10 @@ from pathlib import Path
 from browser import BrowserSession
 from config import OUTPUT_DIR, SITES
 from crawlers.base import BaseCrawler
+from utils import save_json
 
 RAW_DIR = OUTPUT_DIR / "raw" / "ndrims"
 BASE_URL = SITES.get("ndrims", {}).get("base_url", "https://ndrims.dongguk.edu")
-
-
-def _save_json(data, path: Path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 async def _click_menu(page, label: str):
@@ -214,18 +210,10 @@ class NdrimsCrawler(BaseCrawler):
 
         if tt_data:
             result["timetable"] = tt_data
-            total_entries = sum(
-                len(v) for v in tt_data.values() if isinstance(v, list)
-            )
-            for k, v in tt_data.items():
-                if isinstance(v, dict):
-                    for k2, v2 in v.items():
-                        if isinstance(v2, list) and v2:
-                            total_entries += len(v2)
             print(f"    시간표 API 응답: {len(tt_data)}개")
         else:
             print(f"    시간표 데이터 없음")
 
-        _save_json(result, RAW_DIR / "ndrims.json")
+        save_json(result, RAW_DIR / "ndrims.json")
         print(f"\n[ndrims] 완료")
         return result

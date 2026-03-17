@@ -2,12 +2,17 @@
 
 크롤링/패키징 같은 장시간 작업을 subprocess로 실행하고
 상태와 로그를 관리한다. 동시 실행 1개 제한.
+
+NOTE: 모듈 글로벌 _state를 사용하므로 uvicorn 멀티 워커(--workers > 1)에서는
+태스크 상태가 워커 간 공유되지 않아 중복 실행이 발생할 수 있다.
+현재는 단일 워커로 운영하며, 멀티 워커 전환 시 Redis 등 외부 상태 저장소가 필요하다.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -16,6 +21,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 log = logging.getLogger("tasks")
+
+_WORKER_COUNT = int(os.getenv("WEB_CONCURRENCY", "1"))
+if _WORKER_COUNT > 1:
+    log.warning(
+        "멀티 워커(%d) 감지: 태스크 상태가 워커 간 공유되지 않습니다. "
+        "태스크 중복 실행 가능성이 있습니다.",
+        _WORKER_COUNT,
+    )
 
 
 class TaskStatus(str, Enum):
@@ -49,6 +62,7 @@ class TaskState:
 
 
 _state = TaskState()
+_bg_task: asyncio.Task | None = None
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -116,7 +130,9 @@ async def run_task(task_type: str, cmd: list[str], cwd: str | Path | None = None
             _state.logs.append("")
             _state.logs.append(f"[StudyHub] 태스크 종료: {_state.status.value} (exit={_state.exit_code})")
 
-    asyncio.create_task(_run())
+    global _bg_task
+    _bg_task = asyncio.create_task(_run())
+    _bg_task.add_done_callback(lambda t: t.result() if not t.cancelled() and not t.exception() else None)
     return True
 
 
@@ -194,5 +210,7 @@ async def run_chained_tasks(
             _state.logs.append("")
             _state.logs.append(f"[StudyHub] 태스크 종료: {_state.status.value} (exit={_state.exit_code})")
 
-    asyncio.create_task(_run())
+    global _bg_task
+    _bg_task = asyncio.create_task(_run())
+    _bg_task.add_done_callback(lambda t: t.result() if not t.cancelled() and not t.exception() else None)
     return True

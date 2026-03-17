@@ -106,9 +106,21 @@ async def upload_daglo(
     course_dir.mkdir(parents=True, exist_ok=True)
     dest = _ensure_under(course_dir / filename, DAGLO_DIR)
 
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_SIZE:
+    content_length = int(file.size or 0) if hasattr(file, 'size') and file.size else 0
+    if content_length > MAX_UPLOAD_SIZE:
         raise HTTPException(413, f"파일 크기 제한 초과 ({MAX_UPLOAD_SIZE // (1024*1024)}MB)")
+
+    chunks = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 256)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_UPLOAD_SIZE:
+            raise HTTPException(413, f"파일 크기 제한 초과 ({MAX_UPLOAD_SIZE // (1024*1024)}MB)")
+        chunks.append(chunk)
+    content = b"".join(chunks)
 
     try:
         dest.write_bytes(content)

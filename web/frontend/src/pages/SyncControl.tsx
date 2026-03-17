@@ -1,18 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-
-interface TaskStatus {
-  status: "idle" | "running" | "completed" | "failed";
-  task_type: string;
-  started_at: string;
-  finished_at: string;
-  exit_code: number | null;
-  log_lines: number;
-}
-
-type SSEChunk =
-  | { type: "log"; text: string }
-  | { type: "status"; status: string; exit_code: number | null }
-  | { type: "done" };
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLogStream } from "../hooks/useLogStream";
 
 interface AutoSyncStatus {
   enabled: boolean;
@@ -22,10 +9,7 @@ interface AutoSyncStatus {
 }
 
 export default function SyncControl() {
-  const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null);
-  const [logs, setLogs] = useState<string[]>([]);
   const [lastRun, setLastRun] = useState<string | null>(null);
-  const [streaming, setStreaming] = useState(false);
   const [autoSync, setAutoSync] = useState<AutoSyncStatus | null>(null);
 
   const [crawlSites, setCrawlSites] = useState<Set<string>>(new Set(["eclass"]));
@@ -35,6 +19,24 @@ export default function SyncControl() {
   const [gdriveEnabled, setGdriveEnabled] = useState(false);
 
   const logEndRef = useRef<HTMLDivElement>(null);
+
+  const fetchLastRun = useCallback(async () => {
+    try {
+      const r = await fetch("/api/sync/last-run");
+      const data = await r.json();
+      setLastRun(data.last_run ? new Date(data.last_run).toLocaleString("ko-KR") : null);
+    } catch { /* ignore */ }
+  }, []);
+
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const { logs, streaming, taskStatus, startLogStream, clearLogs, fetchTaskStatus } =
+    useLogStream({
+      onStreamEnd: () => {
+        fetchTaskStatus();
+        fetchLastRun();
+      },
+    });
 
   const fetchAutoSync = async () => {
     try {
@@ -56,101 +58,37 @@ export default function SyncControl() {
   };
 
   useEffect(() => {
-    fetchStatus();
+    fetchTaskStatus();
     fetchLastRun();
     fetchAutoSync();
     fetch("/api/gdrive/status").then(r => r.ok ? r.json() : null).then(d => {
       if (d) setGdriveEnabled(d.enabled);
     }).catch(() => {});
-  }, []);
+  }, [fetchTaskStatus, fetchLastRun]);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
 
-  const fetchStatus = async () => {
-    try {
-      const r = await fetch("/api/sync/status");
-      const data = await r.json();
-      setTaskStatus(data);
-      if (data.status === "running") startLogStream();
-    } catch { /* ignore */ }
-  };
-
-  const fetchLastRun = async () => {
-    try {
-      const r = await fetch("/api/sync/last-run");
-      const data = await r.json();
-      setLastRun(data.last_run ? new Date(data.last_run).toLocaleString("ko-KR") : null);
-    } catch { /* ignore */ }
-  };
-
-  const startLogStream = async () => {
-    setStreaming(true);
-    const pending: string[] = [];
-    let flushTimer: ReturnType<typeof setInterval> | null = null;
-
-    const flush = () => {
-      if (pending.length > 0) {
-        const batch = pending.splice(0);
-        setLogs((prev) => [...prev, ...batch]);
-      }
-    };
-    flushTimer = setInterval(flush, 200);
-
-    try {
-      const res = await fetch("/api/sync/logs/stream");
-      if (!res.body) { setStreaming(false); return; }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop()!;
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const chunk: SSEChunk = JSON.parse(line.slice(6));
-            if (chunk.type === "log") {
-              pending.push(chunk.text);
-            } else if (chunk.type === "status") {
-              setTaskStatus((prev) => prev ? { ...prev, status: chunk.status as TaskStatus["status"], exit_code: chunk.exit_code } : prev);
-            }
-          } catch { /* skip */ }
-        }
-      }
-    } catch { /* ignore */ }
-    finally {
-      if (flushTimer) clearInterval(flushTimer);
-      flush();
-    }
-    setStreaming(false);
-    fetchStatus();
-    fetchLastRun();
-  };
-
   const triggerAction = async (endpoint: string, body: object) => {
-    setLogs([]);
+    clearLogs();
+    setActionError(null);
     try {
       const r = await fetch(`/api/sync/${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await r.json();
-      if (data.error) {
-        setLogs([`[오류] ${data.error}`]);
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        setActionError(data.detail || data.error || `HTTP ${r.status}`);
         return;
       }
-      fetchStatus();
+      fetchTaskStatus();
       await new Promise((r) => setTimeout(r, 300));
       startLogStream();
     } catch (e) {
-      setLogs([`[연결 오류] ${e instanceof Error ? e.message : "unknown"}`]);
+      setActionError(e instanceof Error ? e.message : "연결 오류");
     }
   };
 
@@ -300,6 +238,13 @@ export default function SyncControl() {
           </div>
         </section>
       </div>
+
+      {/* 에러 */}
+      {actionError && (
+        <div className="px-4 py-2 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm">
+          {actionError}
+        </div>
+      )}
 
       {/* 상태 바 */}
       {taskStatus && taskStatus.status !== "idle" && taskStatus.task_type && (

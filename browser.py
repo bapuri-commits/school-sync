@@ -24,6 +24,14 @@ class BrowserSession:
         self.sesskey: str | None = None
         self.cookies_dict: dict[str, str] = {}
 
+    async def __aenter__(self):
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+        return False
+
     async def start(self, headless: bool = True):
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(headless=headless)
@@ -108,7 +116,10 @@ class BrowserSession:
         print(f"[SESSION] nDRIMS 브라우저를 엽니다: {base_url}")
         print(f"[SESSION] 브라우저에서 SSO 로그인을 완료해주세요.")
 
-        self._page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
+        async def _auto_accept_dialog(dialog):
+            await dialog.accept()
+
+        self._page.on("dialog", _auto_accept_dialog)
 
         await self._page.goto(base_url, wait_until="networkidle", timeout=60000)
 
@@ -134,6 +145,8 @@ class BrowserSession:
             self.cookies_dict = {c["name"]: c["value"] for c in cookies}
             self._logged_in = True
             print(f"[SESSION] nDRIMS 세션 확보: {self._page.url}")
+
+        self._page.remove_listener("dialog", _auto_accept_dialog)
 
     async def login_sso(self, site_name: str):
         if site_name == "ndrims":

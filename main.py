@@ -20,13 +20,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Windows cp949 콘솔 한글 깨짐 방지
-if sys.platform == "win32":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+from utils import setup_win_encoding
+setup_win_encoding()
 
 from browser import create_session
 from config import CURRENT_SEMESTER, SITES
@@ -170,7 +165,8 @@ async def run(args):
 
 def _write_run_log(sites: list[str], args):
     """실행 기록을 output/.last_run.json에 저장한다."""
-    log_path = Path("output") / ".last_run.json"
+    from config import OUTPUT_DIR
+    log_path = OUTPUT_DIR / ".last_run.json"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     log = {

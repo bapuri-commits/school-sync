@@ -13,7 +13,8 @@ from config import CURRENT_SEMESTER, OUTPUT_DIR
 from models import (
     Course, CalendarEvent, Deadline, Assignment,
     Notice, AttendanceRecord, GradeItem, AcademicSchedule,
-    StudentProfile, NormalizedOutput,
+    StudentProfile, NormalizedOutput, TimetableEntry,
+    SyllabusEntry, SyllabusTextbook, SyllabusWeek,
 )
 
 RAW_ECLASS = OUTPUT_DIR / "raw" / "eclass"
@@ -265,13 +266,23 @@ def normalize_grades(raw: dict, courses: list[Course]) -> list[GradeItem]:
                         item_name=item_name,
                         score=item.get("성적", "-"),
                         weight=weight,
-                        range=item.get("범위", ""),
+                        score_range=item.get("범위", ""),
                         feedback=item.get("피드백", ""),
                     ))
     return results
 
 
-def _normalize_syllabus(raw: dict, courses: list[Course]) -> list[dict]:
+def _clean_html_text(text: str) -> str:
+    """HTML 이스케이프 잔여물과 태그를 정리한다."""
+    if not text:
+        return ""
+    text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    text = text.replace("&quot;", '"').replace("&#39;", "'").replace("&nbsp;", " ")
+    text = re.sub(r'<[^>]+>', '', text)
+    return text.strip()
+
+
+def _normalize_syllabus(raw: dict, courses: list[Course]) -> list[SyllabusEntry]:
     """각 과목의 강의계획서(syllabus)를 정규화한다."""
     results = []
     course_map = {c.id: c for c in courses}
@@ -290,33 +301,37 @@ def _normalize_syllabus(raw: dict, courses: list[Course]) -> list[dict]:
         if "_textbooks" in syl and syl["_textbooks"]:
             for tb in syl["_textbooks"]:
                 if isinstance(tb, dict) and tb.get("title"):
-                    textbooks.append({"type": tb.get("type", "교재"), "title": tb["title"]})
+                    textbooks.append(SyllabusTextbook(type=tb.get("type", "교재"), title=tb["title"]))
         if not textbooks:
             for ttype in ("주교재", "부교재", "참고교재", "참고서적", "참고도서"):
                 title = syl.get(ttype, "").strip()
                 if title:
-                    textbooks.append({"type": ttype, "title": title})
+                    textbooks.append(SyllabusTextbook(type=ttype, title=title))
 
         weekly_plan = []
+        seen_weeks: set[int] = set()
         for key, value in syl.items():
             m = _WEEK_RE.match(key)
             if m:
-                weekly_plan.append({"week": int(m.group(1)), "topic": value.strip()})
-        weekly_plan.sort(key=lambda w: w["week"])
+                week_num = int(m.group(1))
+                if week_num not in seen_weeks:
+                    seen_weeks.add(week_num)
+                    weekly_plan.append(SyllabusWeek(week=week_num, topic=value.strip()))
+        weekly_plan.sort(key=lambda w: w.week)
 
-        results.append({
-            "course_name": course_name,
-            "professor": syl.get("이름", course_data.get("professor", "")),
-            "email": syl.get("e-mail", ""),
-            "category": syl.get("이수구분", ""),
-            "class_type": syl.get("수업방식", ""),
-            "classroom": syl.get("강의실 / 수업시간", ""),
-            "office_hours": syl.get("상담시간", ""),
-            "overview": syl.get("강의개요", ""),
-            "objectives": syl.get("강의목표", ""),
-            "textbooks": textbooks,
-            "weekly_plan": weekly_plan,
-        })
+        results.append(SyllabusEntry(
+            course_name=course_name,
+            professor=syl.get("이름", course_data.get("professor", "")),
+            email=syl.get("e-mail", ""),
+            category=syl.get("이수구분", ""),
+            class_type=syl.get("수업방식", ""),
+            classroom=syl.get("강의실 / 수업시간", ""),
+            office_hours=syl.get("상담시간", ""),
+            overview=_clean_html_text(syl.get("강의개요", "")),
+            objectives=_clean_html_text(syl.get("강의목표", "")),
+            textbooks=textbooks,
+            weekly_plan=weekly_plan,
+        ))
 
     return results
 
@@ -326,9 +341,12 @@ def _normalize_syllabus(raw: dict, courses: list[Course]) -> list[dict]:
 # ──────────────────────────────────────────────
 
 def _load_json(path: Path) -> dict | list | None:
-    if path.exists():
+    if not path.exists():
+        return None
+    try:
         return json.loads(path.read_text(encoding="utf-8"))
-    return None
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def _normalize_portal_notices(portal_raw: dict) -> list[Notice]:
@@ -464,7 +482,7 @@ def _normalize_ndrims_grades(grades_raw: dict) -> list[dict]:
     return result
 
 
-def _normalize_ndrims_timetable(tt_raw: dict) -> list[dict]:
+def _normalize_ndrims_timetable(tt_raw: dict) -> list[TimetableEntry]:
     """nDRIMS 개인 시간표를 정규화한다."""
     result = []
     courses = None
@@ -478,16 +496,16 @@ def _normalize_ndrims_timetable(tt_raw: dict) -> list[dict]:
         return result
 
     for item in courses:
-        result.append({
-            "course_name": item.get("SBJ_NM", ""),
-            "course_code": item.get("SBJ_NO", ""),
-            "professor": item.get("EMP_NM", ""),
-            "schedule": item.get("TMTBL_KOR_DSC", ""),
-            "room": item.get("ROOM_KOR_DSC", ""),
-            "credits": item.get("CDT", ""),
-            "category": item.get("CPDIV_NM", ""),
-            "campus": item.get("LESN_REGN_CD_NM", ""),
-        })
+        result.append(TimetableEntry(
+            course_name=item.get("SBJ_NM", ""),
+            course_code=item.get("SBJ_NO", ""),
+            professor=item.get("EMP_NM", ""),
+            schedule=item.get("TMTBL_KOR_DSC", ""),
+            room=item.get("ROOM_KOR_DSC", ""),
+            credits=str(item.get("CDT", "")),
+            category=item.get("CPDIV_NM", ""),
+            campus=item.get("LESN_REGN_CD_NM", ""),
+        ))
 
     return result
 
@@ -574,168 +592,19 @@ def normalize(semester: str = "") -> NormalizedOutput:
         notices=notices,
         attendance=attendance,
         grades=grades,
+        timetable=ndrims_timetable,
         academic_schedule=academic_schedule,
+        syllabus=syllabus,
+        grade_history=ndrims_grade_history,
         student_profile=student_profile,
     )
 
-    _save_normalized(output, ndrims_grade_history, ndrims_timetable, syllabus)
-    _generate_briefing(output)
-    _print_summary(output, syllabus)
+    from normalizer_storage import save_normalized
+    from briefing import generate_briefing, print_summary
+
+    save_normalized(output)
+    generate_briefing(output)
+    print_summary(output)
     return output
 
 
-def _save_normalized(output: NormalizedOutput,
-                     ndrims_grade_history: list = None,
-                     ndrims_timetable: list = None,
-                     syllabus: list = None):
-    def _write(path: Path, data):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if isinstance(data, list):
-            content = [item.model_dump(mode="json") for item in data]
-        else:
-            content = data.model_dump(mode="json")
-        path.write_text(
-            json.dumps(content, ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8",
-        )
-
-    def _write_raw(path: Path, data):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8",
-        )
-
-    ndrims_grade_history = ndrims_grade_history or []
-    ndrims_timetable = ndrims_timetable or []
-    syllabus = syllabus or []
-
-    academics = NORM_DIR / "academics"
-    _write(academics / "courses.json", output.courses)
-    _write(academics / "deadlines.json", output.deadlines)
-    _write(academics / "assignments.json", output.assignments)
-    _write(academics / "attendance.json", output.attendance)
-    _write(academics / "grades.json", output.grades)
-    if syllabus:
-        _write_raw(academics / "syllabus.json", syllabus)
-
-    schedule = NORM_DIR / "schedule"
-    _write(schedule / "calendar.json", output.calendar)
-    _write(schedule / "academic_schedule.json", output.academic_schedule)
-
-    info = NORM_DIR / "info"
-    _write(info / "notices.json", output.notices)
-
-    if output.student_profile:
-        profile_dir = NORM_DIR / "profile"
-        _write(profile_dir / "student.json", [output.student_profile])
-
-    if ndrims_grade_history:
-        _write_raw(NORM_DIR / "profile" / "grade_history.json", ndrims_grade_history)
-    if ndrims_timetable:
-        _write_raw(NORM_DIR / "schedule" / "timetable.json", ndrims_timetable)
-
-    # 이전 flat 구조 파일 정리
-    for old_file in ["courses.json", "deadlines.json", "assignments.json", "attendance.json",
-                      "grades.json", "calendar.json", "academic_schedule.json", "notices.json",
-                      "student_profile.json"]:
-        old_path = NORM_DIR / old_file
-        if old_path.exists():
-            old_path.unlink()
-
-
-def _generate_briefing(output: NormalizedOutput):
-    """오늘 기준 브리핑 마크다운을 생성한다."""
-    today = date.today()
-    lines = [f"# school_sync 브리핑 — {today}", ""]
-
-    # 마감 임박
-    lines.append("## 마감 임박")
-    upcoming = [d for d in output.deadlines if 0 <= d.d_day <= 7]
-    if upcoming:
-        lines.append("| 과목 | 과제 | D-day | 링크 |")
-        lines.append("|------|------|-------|------|")
-        for d in upcoming:
-            lines.append(f"| {d.course_name or '-'} | {d.title} | D-{d.d_day} | [링크]({d.url}) |")
-    else:
-        lines.append("임박한 마감 없음")
-    lines.append("")
-
-    # 진행 중인 학사일정
-    lines.append("## 진행 중인 학사일정")
-    today_str = today.isoformat()
-    active_schedule = []
-    for s in output.academic_schedule:
-        if s.end_date:
-            if s.start_date <= today_str <= s.end_date:
-                active_schedule.append(s)
-        elif s.start_date == today_str:
-            active_schedule.append(s)
-    if active_schedule:
-        for s in active_schedule:
-            period = f"{s.start_date} ~ {s.end_date}" if s.end_date else s.start_date
-            lines.append(f"- {s.title} ({period})")
-    else:
-        lines.append("오늘 해당하는 학사일정 없음")
-    lines.append("")
-
-    # 최근 공지
-    lines.append("## 최근 공지 (48시간 이내)")
-    recent_notices = [n for n in output.notices if n.date and n.date >= (today - timedelta(days=2)).isoformat()]
-    if recent_notices:
-        for n in recent_notices[:15]:
-            source = {"eclass": "eclass", "portal": "포탈", "department": "학과"}.get(n.source_site, n.source_site)
-            prefix = f"[{source}]"
-            if n.category:
-                prefix = f"[{source}/{n.category}]"
-            lines.append(f"- {prefix} {n.title} ({n.date})")
-    else:
-        lines.append("최근 공지 없음")
-    lines.append("")
-
-    # 출석 주의
-    lines.append("## 출석 주의")
-    absences = [a for a in output.attendance if a.status == "결석"]
-    if absences:
-        for a in absences:
-            lines.append(f"- {a.course_name} {a.week}주차 {a.period} ({a.date}): **결석**")
-    else:
-        lines.append("결석 기록 없음")
-    lines.append("")
-
-    # 프로필 요약
-    if output.student_profile:
-        p = output.student_profile
-        lines.append("## 프로필")
-        lines.append(f"- {p.name} | {p.department}")
-        lines.append(f"- {p.grade}학년 | 평점 {p.gpa} | 이수 {p.total_credits}학점 / 졸업소요 {p.graduation_semesters}학기")
-        lines.append("")
-
-    briefing_path = NORM_DIR / "briefing.md"
-    briefing_path.write_text("\n".join(lines), encoding="utf-8")
-
-
-def _print_summary(output: NormalizedOutput, syllabus: list = None):
-    syllabus = syllabus or []
-    print(f"\n{'='*60}")
-    print(f"  정규화 완료 — {output.semester}")
-    print(f"{'='*60}")
-    print(f"  과목: {len(output.courses)}개")
-    print(f"  강의계획서: {len(syllabus)}개")
-    print(f"  마감: {len(output.deadlines)}개 (D-day 기준 정렬)")
-    if output.deadlines:
-        upcoming = [d for d in output.deadlines if d.d_day >= 0]
-        if upcoming:
-            nearest = upcoming[0]
-            print(f"    → 가장 가까운: [{nearest.course_name}] {nearest.title} (D-{nearest.d_day})")
-    print(f"  과제/활동: {len(output.assignments)}개")
-    print(f"  캘린더: {len(output.calendar)}개")
-    print(f"  공지: {len(output.notices)}개")
-    print(f"  출석: {len(output.attendance)}개 기록")
-    print(f"  성적: {len(output.grades)}개 항목")
-    print(f"  학사일정: {len(output.academic_schedule)}개")
-    if output.student_profile:
-        p = output.student_profile
-        print(f"  프로필: {p.name} | {p.major} {p.grade}학년 | 평점 {p.gpa} | {p.total_credits}학점")
-    print(f"  출력: {NORM_DIR}/")
-    print(f"{'='*60}")

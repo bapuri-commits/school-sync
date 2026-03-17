@@ -3,14 +3,10 @@
 인증 불필요 (공개 페이지).
 """
 
-import json
-from pathlib import Path
-
 from browser import BrowserSession
-from config import OUTPUT_DIR, SITES, REQUEST_TIMEOUT
-
-_GOTO_TIMEOUT = int(REQUEST_TIMEOUT * 1000)
+from config import OUTPUT_DIR, SITES, GOTO_TIMEOUT_MS
 from crawlers.base import BaseCrawler
+from utils import save_json
 
 RAW_DIR = OUTPUT_DIR / "raw" / "portal"
 
@@ -21,11 +17,6 @@ NOTICE_BOARDS = {
     "학사공지": "HAKSANOTICE",
     "장학공지": "JANGHAKNOTICE",
 }
-
-
-def _save_json(data, path: Path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 class PortalCrawler(BaseCrawler):
@@ -53,7 +44,7 @@ class PortalCrawler(BaseCrawler):
             print(f"  [에러] 학사일정 추출 실패: {e}")
             result["academic_schedule"] = {"_error": str(e)}
 
-        _save_json(result, RAW_DIR / "portal.json")
+        save_json(result, RAW_DIR / "portal.json")
         total_posts = sum(
             len(v.get("posts", [])) for v in result.values() if isinstance(v, dict) and "posts" in v
         )
@@ -66,29 +57,44 @@ class PortalCrawler(BaseCrawler):
         all_posts = []
         for page_idx in range(1, max_pages + 1):
             url = f"{BASE_URL}/article/{board_code}/list?pageIndex={page_idx}"
-            await page.goto(url, wait_until="networkidle", timeout=_GOTO_TIMEOUT)
+            await page.goto(url, wait_until="networkidle", timeout=GOTO_TIMEOUT_MS)
 
             posts = await page.evaluate("""
                 (boardCode) => {
                     const posts = [];
-                    document.querySelectorAll('.board_list ul li').forEach(li => {
-                        const linkEl = li.querySelector('a[onclick*="goDetail"]');
+
+                    // 1차: .board_list ul li (기본 구조)
+                    let items = document.querySelectorAll('.board_list ul li');
+                    // 2차 fallback: 대체 게시판 셀렉터
+                    if (items.length === 0) items = document.querySelectorAll('.bbs_list ul li, .notice_list li');
+                    // 3차 fallback: 테이블 기반
+                    if (items.length === 0) items = document.querySelectorAll('table.board tbody tr, .board_table tbody tr');
+
+                    items.forEach(el => {
+                        const linkEl = el.querySelector('a[onclick*="goDetail"], a[href*="detail"]');
                         if (!linkEl) return;
 
-                        const titleEl = li.querySelector('p.tit');
+                        const titleEl = el.querySelector('p.tit, .title, .subject, td.title a, a');
                         const title = titleEl ? titleEl.innerText.trim() : '';
                         if (!title) return;
 
-                        const onclickMatch = linkEl.getAttribute('onclick').match(/goDetail\\((\\d+)\\)/);
-                        const articleId = onclickMatch ? onclickMatch[1] : '';
+                        let articleId = '';
+                        const onclick = linkEl.getAttribute('onclick') || '';
+                        const onclickMatch = onclick.match(/goDetail\\((\\d+)\\)/);
+                        if (onclickMatch) {
+                            articleId = onclickMatch[1];
+                        } else {
+                            const hrefMatch = (linkEl.getAttribute('href') || '').match(/detail\\/(\\d+)/);
+                            if (hrefMatch) articleId = hrefMatch[1];
+                        }
                         const url = articleId
                             ? `https://www.dongguk.edu/article/${boardCode}/detail/${articleId}`
                             : '';
 
-                        const cateEl = li.querySelector('.top em');
+                        const cateEl = el.querySelector('.top em, .category, .cate');
                         const category = cateEl ? cateEl.innerText.trim() : '';
 
-                        const text = li.innerText;
+                        const text = el.innerText;
                         const dateMatch = text.match(/(\\d{4}\\.\\d{2}\\.\\d{2})/);
                         const date = dateMatch ? dateMatch[1].replace(/\\./g, '-') : '';
                         const viewMatch = text.match(/조회\\s*(\\d[\\d,]*)/);
@@ -106,20 +112,24 @@ class PortalCrawler(BaseCrawler):
                 break
 
         seen_urls = set()
+        seen_titles = set()
         unique = []
         for p in all_posts:
             if p["url"] and p["url"] not in seen_urls:
                 seen_urls.add(p["url"])
                 unique.append(p)
             elif not p["url"]:
-                unique.append(p)
+                dedup_key = (p.get("title", ""), p.get("date", ""))
+                if dedup_key not in seen_titles:
+                    seen_titles.add(dedup_key)
+                    unique.append(p)
         return unique
 
     async def _extract_schedule(self, page) -> list[dict]:
         """학사일정 페이지에서 일정 목록을 추출한다."""
         seq = _portal_cfg.get("schedule_info_seq", 22)
         url = f"{BASE_URL}/schedule/detail?schedule_info_seq={seq}"
-        await page.goto(url, wait_until="networkidle", timeout=_GOTO_TIMEOUT)
+        await page.goto(url, wait_until="networkidle", timeout=GOTO_TIMEOUT_MS)
 
         events = await page.evaluate("""
             () => {

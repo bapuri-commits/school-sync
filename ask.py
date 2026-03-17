@@ -13,12 +13,8 @@ import json
 import sys
 from datetime import date, timedelta
 
-if sys.platform == "win32":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+from utils import setup_win_encoding
+setup_win_encoding()
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -54,7 +50,7 @@ DATA_FILES = {
     "schedule/calendar.json":                 ("캘린더",                           "schedule",  38),
     "schedule/timetable.json":                ("시간표 (nDRIMS)",                  "schedule",  12),
     "info/notices.json":                      ("공지사항",                         "info",      45),
-    "profile/student.json":                   ("학적 프로필",                      "profile",   5),
+    "profile/student.json":                   ("학적 프로필 (이름/학과/학점)",       "profile",   5),
     "profile/grade_history.json":             ("전체 성적 이력 (nDRIMS)",           "profile",   50),
     "profile/graduation_requirements.json":   ("졸업 요건 (데이터사이언스전공 2023학번)", "profile", 8),
 }
@@ -129,6 +125,17 @@ def _classify_question(question: str) -> set[str]:
     for keyword, cats in QUESTION_CATEGORY_MAP.items():
         if keyword in question:
             categories.update(cats)
+
+    if "강의" in question and categories:
+        syllabus_clues = ("계획", "개요", "목표", "교수", "교재", "주차", "이수", "상담")
+        schedule_clues = ("시간", "실", "장소", "몇 시", "언제", "오늘", "내일")
+        has_syllabus = any(w in question for w in syllabus_clues)
+        has_schedule = any(w in question for w in schedule_clues)
+        if has_syllabus and not has_schedule:
+            categories.discard("schedule")
+        elif has_schedule and not has_syllabus:
+            categories.discard("syllabus")
+
     if not categories:
         categories = {"briefing", "academics", "profile", "schedule"}
     if categories & _BRIEFING_RELEVANT:
@@ -233,6 +240,15 @@ def _load_context(categories: set[str], question: str = "",
                 data = _smart_filter(rel_path, data, question, course_names)
             if isinstance(data, list) and len(data) == 0:
                 continue
+            if "student" in rel_path:
+                if isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, dict):
+                            item.pop("phone", None)
+                            item.pop("email", None)
+                elif isinstance(data, dict):
+                    data.pop("phone", None)
+                    data.pop("email", None)
             section = f"=== {label} ===\n{json.dumps(data, ensure_ascii=False, indent=1)}"
 
         if total_chars + len(section) > max_chars and sections:
@@ -314,7 +330,8 @@ def _ask(client: Anthropic, question: str, history: list[dict],
 def main():
     parser = argparse.ArgumentParser(description="school_sync Q&A")
     parser.add_argument("question", nargs="?", help="질문 (없으면 대화 모드)")
-    parser.add_argument("--refresh", action="store_true", help="정규화 재실행 후 시작")
+    parser.add_argument("--refresh", action="store_true",
+                        help="기존 raw 데이터를 다시 정규화한 뒤 대화 시작 (크롤링은 하지 않음)")
     parser.add_argument("--no-search", action="store_true", help="웹검색 비활성화")
     args = parser.parse_args()
 
