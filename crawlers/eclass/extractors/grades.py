@@ -1,12 +1,13 @@
 """성적 추출."""
 
 from config import BASE_URL
+from browser import safe_goto
 
 
 async def extract_grades(page, course_id: int) -> list[dict]:
     """성적 페이지에서 데이터를 추출한다."""
     url = f"{BASE_URL}/grade/report/user/index.php?id={course_id}"
-    await page.goto(url, wait_until="networkidle")
+    await safe_goto(page, url)
 
     grades = await page.evaluate("""
         () => {

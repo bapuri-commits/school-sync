@@ -5,8 +5,8 @@
 
 import asyncio
 
-from browser import BrowserSession
-from config import OUTPUT_DIR, SITES, REQUEST_DELAY, GOTO_TIMEOUT_MS
+from browser import BrowserSession, safe_goto
+from config import OUTPUT_DIR, SITES, REQUEST_DELAY
 from crawlers.base import BaseCrawler
 from cache import CacheBatch, content_hash
 from utils import save_json
@@ -60,7 +60,7 @@ class DepartmentCrawler(BaseCrawler):
         all_posts = []
         for page_idx in range(1, max_pages + 1):
             url = f"{BASE_URL}/article/{board_path}/list?pageIndex={page_idx}"
-            await page.goto(url, wait_until="networkidle", timeout=GOTO_TIMEOUT_MS)
+            await safe_goto(page, url)
 
             posts = await page.evaluate("""
                 () => {
@@ -138,7 +138,7 @@ class DepartmentCrawler(BaseCrawler):
     async def _extract_post_body(self, page, detail_url: str) -> dict:
         """글 상세 페이지에서 본문과 첨부파일을 추출한다."""
         try:
-            await page.goto(detail_url, wait_until="networkidle", timeout=GOTO_TIMEOUT_MS)
+            await safe_goto(page, detail_url)
 
             data = await page.evaluate("""
                 () => {

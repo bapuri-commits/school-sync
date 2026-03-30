@@ -1,12 +1,13 @@
 """출석 기록 추출."""
 
 from config import BASE_URL
+from browser import safe_goto
 
 
 async def extract_attendance(page, course_id: int) -> dict:
     """출석부 페이지에서 데이터를 추출한다."""
     url = f"{BASE_URL}/local/ubattendance/attendance_book.php?id={course_id}"
-    await page.goto(url, wait_until="networkidle")
+    await safe_goto(page, url)
 
     data = await page.evaluate("""
         () => {

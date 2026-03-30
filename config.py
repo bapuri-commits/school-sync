@@ -18,13 +18,13 @@ SCHOOL_USERNAME: str = ""
 SCHOOL_PASSWORD: str = ""
 CURRENT_SEMESTER: str = "2026-1"
 REQUEST_DELAY: float = 0.5
-REQUEST_TIMEOUT: float = 30.0
+REQUEST_TIMEOUT: float = 60.0
 OUTPUT_DIR: Path = Path(__file__).parent / "output"
 SITES: dict = {}
 BASE_URL: str = "https://eclass.dongguk.edu"
 GLOBAL_BOARD_IDS: set[int] = {31, 32, 33}
 MIN_DOWNLOAD_SIZE_BYTES: int = 512
-GOTO_TIMEOUT_MS: int = 30000
+GOTO_TIMEOUT_MS: int = 60000
 
 
 def _ensure_loaded() -> None:

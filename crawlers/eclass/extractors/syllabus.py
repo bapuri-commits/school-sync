@@ -1,6 +1,7 @@
 """강의 계획서 추출."""
 
-from config import BASE_URL, GOTO_TIMEOUT_MS
+from config import BASE_URL
+from browser import safe_goto
 
 _TEXTBOOK_KEYS = {"주교재", "부교재", "참고교재", "참고서적", "참고도서"}
 
@@ -8,7 +9,7 @@ _TEXTBOOK_KEYS = {"주교재", "부교재", "참고교재", "참고서적", "참
 async def extract_syllabus(page, course_id: int) -> dict:
     """강의 계획서 페이지에서 데이터를 추출한다."""
     url = f"{BASE_URL}/local/ubion/setting/syllabus.php?id={course_id}"
-    await page.goto(url, wait_until="networkidle", timeout=GOTO_TIMEOUT_MS)
+    await safe_goto(page, url)
 
     data = await page.evaluate("""
         () => {

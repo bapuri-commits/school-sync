@@ -65,8 +65,8 @@ async def _stream_response(question: str, history: list[dict], web_search: bool)
 
     client = _get_client()
 
-    categories = _classify_question(question)
-    context = _load_context(categories, question)
+    categories, mentioned_course = _classify_question(question, client)
+    context = _load_context(categories, question, mentioned_course=mentioned_course)
 
     if not context:
         yield f"data: {json.dumps({'type': 'error', 'text': 'normalized 데이터가 없습니다.'}, ensure_ascii=False)}\n\n"
@@ -80,6 +80,7 @@ async def _stream_response(question: str, history: list[dict], web_search: bool)
         max_tokens=4096,
         system=system,
         messages=history + [{"role": "user", "content": question}],
+        temperature=0,
     )
     if tools:
         kwargs["tools"] = tools

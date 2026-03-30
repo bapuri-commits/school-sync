@@ -1,7 +1,8 @@
 """게시판(공지사항/자료실) 추출 — 본문 + 첨부파일 포함."""
 
 import asyncio
-from config import BASE_URL, REQUEST_DELAY, GLOBAL_BOARD_IDS, GOTO_TIMEOUT_MS
+from config import BASE_URL, REQUEST_DELAY, GLOBAL_BOARD_IDS
+from browser import safe_goto
 from cache import mark_collected, content_hash
 
 
@@ -13,7 +14,7 @@ async def extract_boards(page, course_id: int, scanned_boards: list[dict] | None
         board_links = scanned_boards
     else:
         boards_url = f"{BASE_URL}/mod/ubboard/index.php?id={course_id}"
-        await page.goto(boards_url, wait_until="networkidle", timeout=GOTO_TIMEOUT_MS)
+        await safe_goto(page, boards_url)
 
         board_links = await page.evaluate("""
             () => {
@@ -67,7 +68,7 @@ async def extract_boards(page, course_id: int, scanned_boards: list[dict] | None
 
 async def _extract_board_posts(page, board_id: int, board_name: str) -> list[dict]:
     url = f"{BASE_URL}/mod/ubboard/view.php?id={board_id}"
-    await page.goto(url, wait_until="networkidle", timeout=GOTO_TIMEOUT_MS)
+    await safe_goto(page, url)
 
     posts = await page.evaluate("""
         () => {
@@ -108,7 +109,7 @@ async def _extract_board_posts(page, board_id: int, board_name: str) -> list[dic
 async def _extract_post_body(page, article_url: str) -> dict:
     """게시판 글 상세 페이지에서 본문과 첨부파일 정보를 추출한다."""
     try:
-        await page.goto(article_url, wait_until="networkidle", timeout=GOTO_TIMEOUT_MS)
+        await safe_goto(page, article_url)
 
         data = await page.evaluate("""
             () => {

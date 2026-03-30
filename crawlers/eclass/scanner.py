@@ -7,7 +7,8 @@
 import asyncio
 import re
 from dataclasses import dataclass, field, asdict
-from config import BASE_URL, GLOBAL_BOARD_IDS, REQUEST_DELAY, GOTO_TIMEOUT_MS
+from config import BASE_URL, GLOBAL_BOARD_IDS, REQUEST_DELAY
+from browser import safe_goto
 
 
 @dataclass
@@ -81,7 +82,7 @@ async def scan_course(page, course_id: int, course_name: str = "") -> CourseScan
     """과목 페이지를 스캔하여 사용 가능한 기능/구조를 파악한다."""
     scan = CourseScan(course_id=course_id, course_name=course_name)
 
-    await page.goto(f"{BASE_URL}/course/view.php?id={course_id}", wait_until="networkidle", timeout=GOTO_TIMEOUT_MS)
+    await safe_goto(page, f"{BASE_URL}/course/view.php?id={course_id}")
 
     # 1. 네비게이션/메뉴 링크에서 기능 탐색
     nav_links = await page.evaluate("""
@@ -155,7 +156,7 @@ async def scan_course(page, course_id: int, course_name: str = "") -> CourseScan
     # 3. 게시판 목록 스캔
     if scan.has("boards"):
         boards_url = f"{BASE_URL}/mod/ubboard/index.php?id={course_id}"
-        await page.goto(boards_url, wait_until="networkidle", timeout=GOTO_TIMEOUT_MS)
+        await safe_goto(page, boards_url)
 
         board_links = await page.evaluate("""
             () => {
@@ -179,7 +180,7 @@ async def scan_course(page, course_id: int, course_name: str = "") -> CourseScan
     for board in scan.boards:
         if any(kw in board["name"] for kw in ("자료", "학습", "resource", "파일")):
             await asyncio.sleep(REQUEST_DELAY)
-            await page.goto(board["url"], wait_until="networkidle", timeout=GOTO_TIMEOUT_MS)
+            await safe_goto(page, board["url"])
             file_links = await page.evaluate("""
                 () => {
                     const files = [];

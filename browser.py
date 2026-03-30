@@ -11,8 +11,55 @@ import re
 from playwright.async_api import async_playwright, Browser, Page
 from config import (
     BASE_URL, SCHOOL_USERNAME, SCHOOL_PASSWORD,
-    REQUEST_DELAY, REQUEST_TIMEOUT, SITES,
+    REQUEST_DELAY, REQUEST_TIMEOUT, SITES, GOTO_TIMEOUT_MS,
 )
+
+RETRY_NETWORK_ERRORS = (
+    "ERR_NAME_NOT_RESOLVED",
+    "ERR_CONNECTION_RESET",
+    "ERR_CONNECTION_REFUSED",
+    "ERR_CONNECTION_CLOSED",
+    "ERR_TIMED_OUT",
+    "ERR_NETWORK_CHANGED",
+)
+MAX_GOTO_RETRIES = 3
+
+
+async def safe_goto(
+    page: Page,
+    url: str,
+    *,
+    timeout: int | None = None,
+    retries: int = MAX_GOTO_RETRIES,
+) -> None:
+    """page.goto wrapper — domcontentloaded 대기 + 일시적 네트워크 오류 재시도.
+
+    networkidle 대신 domcontentloaded를 사용하여 Moodle 폴링/WebSocket으로
+    인한 타임아웃을 방지한다. DNS 해석 실패 등 일시적 오류는 지수 백오프로 재시도.
+    """
+    timeout = timeout or GOTO_TIMEOUT_MS
+    last_error: Exception | None = None
+
+    for attempt in range(retries):
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+            try:
+                await page.wait_for_load_state("load", timeout=5000)
+            except Exception:
+                pass
+            return
+        except Exception as e:
+            last_error = e
+            err_str = str(e)
+            is_retryable = any(code in err_str for code in RETRY_NETWORK_ERRORS)
+            if is_retryable and attempt < retries - 1:
+                wait_sec = 2 ** (attempt + 1)
+                print(f"  [RETRY] {attempt + 1}/{retries} 일시적 네트워크 오류, "
+                      f"{wait_sec}초 후 재시도... ({url.split('?')[0]})")
+                await asyncio.sleep(wait_sec)
+            else:
+                raise
+    raise last_error  # type: ignore[misc]
 
 
 class BrowserSession:
@@ -172,11 +219,7 @@ class BrowserSession:
     async def goto(self, url: str, delay: float = REQUEST_DELAY) -> Page:
         if delay > 0:
             await asyncio.sleep(delay)
-        try:
-            await self._page.goto(url, wait_until="networkidle")
-        except Exception as e:
-            print(f"[SESSION] 페이지 로드 실패 ({url}): {e}")
-            raise
+        await safe_goto(self._page, url)
         return self._page
 
     async def close(self):

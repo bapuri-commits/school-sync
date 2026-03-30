@@ -1,12 +1,13 @@
 """과제/활동 추출. 과목 메인 페이지의 섹션/활동에서 정보를 추출한다."""
 
 from config import BASE_URL
+from browser import safe_goto
 
 
 async def extract_assignments(page, course_id: int) -> dict:
     """과목 페이지에서 과제/활동 정보를 추출한다."""
     url = f"{BASE_URL}/course/view.php?id={course_id}"
-    await page.goto(url, wait_until="networkidle")
+    await safe_goto(page, url)
 
     activities = await page.evaluate("""
         () => {

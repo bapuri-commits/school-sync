@@ -55,31 +55,34 @@ DATA_FILES = {
     "profile/graduation_requirements.json":   ("졸업 요건 (데이터사이언스전공 2023학번)", "profile", 8),
 }
 
-QUESTION_CATEGORY_MAP = {
-    "과제": ["academics"], "마감": ["academics"], "출석": ["academics"],
-    "결석": ["academics"], "퀴즈": ["academics"], "리포트": ["academics"],
-    "레포트": ["academics"], "제출": ["academics"],
-    "성적": ["academics", "profile"], "학점": ["academics", "profile"],
-    "평점": ["academics", "profile"], "GPA": ["academics", "profile"],
-    "졸업": ["profile", "schedule"], "프로필": ["profile"],
-    "학과": ["profile"], "학번": ["profile"], "이수": ["profile"],
-    "시간표": ["schedule"], "캘린더": ["schedule"], "일정": ["schedule"],
-    "학사일정": ["schedule"], "개강": ["schedule"], "종강": ["schedule"],
-    "방학": ["schedule"], "휴강": ["schedule"], "보강": ["schedule"],
-    "중간고사": ["schedule"], "기말고사": ["schedule"],
-    "중간": ["schedule"], "기말": ["schedule"],
-    "시험": ["schedule", "syllabus"],
-    "수강": ["academics", "schedule"], "수업": ["schedule", "academics"],
-    "공지": ["info"], "장학": ["info"], "안내": ["info"],
-    "공모전": ["info"], "특강": ["info"],
-    "교재": ["syllabus"], "교과서": ["syllabus"], "책": ["syllabus"],
-    "강의계획": ["syllabus"], "수업계획": ["syllabus"],
-    "실습": ["syllabus", "academics"], "교수": ["syllabus", "academics"],
-    "이메일": ["syllabus"], "상담": ["syllabus"], "주차": ["syllabus"],
-    "강의실": ["syllabus", "schedule"],
-    "강의개요": ["syllabus"], "강의목표": ["syllabus"],
-    "강의": ["syllabus", "schedule"],
-}
+# [LEGACY] 키워드 매칭 기반 분류 — LLM 분류 실패 시 fallback으로 사용
+# QUESTION_CATEGORY_MAP = {
+#     "과제": ["academics"], "마감": ["academics"], "출석": ["academics"],
+#     "결석": ["academics"], "퀴즈": ["academics"], "리포트": ["academics"],
+#     "레포트": ["academics"], "제출": ["academics"],
+#     "성적": ["academics", "profile"], "학점": ["academics", "profile"],
+#     "평점": ["academics", "profile"], "GPA": ["academics", "profile"],
+#     "졸업": ["profile", "schedule"], "프로필": ["profile"],
+#     "학과": ["profile"], "학번": ["profile"], "이수": ["profile"],
+#     "시간표": ["schedule"], "캘린더": ["schedule"], "일정": ["schedule"],
+#     "학사일정": ["schedule"], "개강": ["schedule"], "종강": ["schedule"],
+#     "방학": ["schedule"], "휴강": ["schedule"], "보강": ["schedule"],
+#     "중간고사": ["schedule"], "기말고사": ["schedule"],
+#     "중간": ["schedule"], "기말": ["schedule"],
+#     "시험": ["schedule", "syllabus"],
+#     "수강": ["academics", "schedule"], "수업": ["schedule", "academics"],
+#     "공지": ["info"], "장학": ["info"], "안내": ["info"],
+#     "공모전": ["info"], "특강": ["info"],
+#     "교재": ["syllabus"], "교과서": ["syllabus"], "책": ["syllabus"],
+#     "강의계획": ["syllabus"], "수업계획": ["syllabus"],
+#     "실습": ["syllabus", "academics"], "교수": ["syllabus", "academics"],
+#     "이메일": ["syllabus"], "상담": ["syllabus"], "주차": ["syllabus"],
+#     "강의실": ["syllabus", "schedule"],
+#     "강의개요": ["syllabus"], "강의목표": ["syllabus"],
+#     "강의": ["syllabus", "schedule"],
+# }
+
+_AVAILABLE_CATEGORIES = sorted({cat for _, cat, _ in DATA_FILES.values()})
 
 _BRIEFING_RELEVANT = {"academics", "schedule", "info"}
 
@@ -120,9 +123,94 @@ def _build_system_prompt(web_search_enabled: bool = True) -> str:
 #  질문 분류
 # ──────────────────────────────────────────────
 
-def _classify_question(question: str) -> set[str]:
+_CATEGORY_DESCRIPTIONS = {
+    "academics": "수강 과목, 과제, 마감, 출석, 성적, 퀴즈, 제출",
+    "briefing": "오늘의 브리핑, 일일 요약",
+    "info": "공지사항, 장학, 안내, 공모전, 특강",
+    "profile": "학적 프로필, 전체 성적 이력, 졸업 요건, 학과, 학번, GPA",
+    "schedule": "시간표, 캘린더, 학사일정, 개강, 종강, 시험, 중간/기말",
+    "syllabus": "강의계획서, 교재, 교수 정보, 수업 주차, 강의개요/목표",
+}
+
+
+def _classify_question(question: str, client=None) -> tuple[set[str], str | None]:
+    """LLM 기반 질문 분류 + 과목 추출. 실패 시 키워드 fallback.
+
+    Returns:
+        (categories, mentioned_course): 카테고리 집합과 언급된 과목명(없으면 None).
+    """
+    if client is not None:
+        try:
+            return _classify_question_llm(question, client)
+        except Exception:
+            pass
+    return _classify_question_keyword(question)
+
+
+def _classify_question_llm(question: str, client) -> tuple[set[str], str | None]:
+    course_names = _get_course_names()
+    cat_list = "\n".join(
+        f"- {cat}: {_CATEGORY_DESCRIPTIONS.get(cat, '')}"
+        for cat in _AVAILABLE_CATEGORIES
+    )
+    prompt = (
+        "다음 질문을 분류해줘. 아래 형식의 JSON으로만 응답해.\n"
+        "다른 텍스트, 설명, 마크다운 없이 JSON만 출력해.\n\n"
+        f"카테고리 목록:\n{cat_list}\n\n"
+        f"수강 과목 목록: {course_names}\n\n"
+        f"질문: {question}\n\n"
+        '출력 형식:\n'
+        '{\n'
+        '  "categories": ["academics", "briefing"],\n'
+        '  "mentioned_course": "알고리즘및실습"  // 과목 언급 없으면 null\n'
+        '}'
+    )
+    resp = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=150,
+        temperature=0,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = resp.content[0].text.strip()
+    parsed = json.loads(text)
+    categories = {c for c in parsed.get("categories", []) if c in _AVAILABLE_CATEGORIES}
+    if not categories:
+        categories = {"briefing", "academics", "profile", "schedule"}
+    if categories & _BRIEFING_RELEVANT:
+        categories.add("briefing")
+    mentioned_course = parsed.get("mentioned_course") or None
+    return categories, mentioned_course
+
+
+def _classify_question_keyword(question: str) -> tuple[set[str], None]:
+    """[LEGACY] 키워드 매칭 기반 fallback 분류. 과목 추출은 None 반환."""
+    keyword_map = {
+        "과제": ["academics"], "마감": ["academics"], "출석": ["academics"],
+        "결석": ["academics"], "퀴즈": ["academics"], "리포트": ["academics"],
+        "레포트": ["academics"], "제출": ["academics"],
+        "성적": ["academics", "profile"], "학점": ["academics", "profile"],
+        "평점": ["academics", "profile"], "GPA": ["academics", "profile"],
+        "졸업": ["profile", "schedule"], "프로필": ["profile"],
+        "학과": ["profile"], "학번": ["profile"], "이수": ["profile"],
+        "시간표": ["schedule"], "캘린더": ["schedule"], "일정": ["schedule"],
+        "학사일정": ["schedule"], "개강": ["schedule"], "종강": ["schedule"],
+        "방학": ["schedule"], "휴강": ["schedule"], "보강": ["schedule"],
+        "중간고사": ["schedule"], "기말고사": ["schedule"],
+        "중간": ["schedule"], "기말": ["schedule"],
+        "시험": ["schedule", "syllabus"],
+        "수강": ["academics", "schedule"], "수업": ["schedule", "academics"],
+        "공지": ["info"], "장학": ["info"], "안내": ["info"],
+        "공모전": ["info"], "특강": ["info"],
+        "교재": ["syllabus"], "교과서": ["syllabus"], "책": ["syllabus"],
+        "강의계획": ["syllabus"], "수업계획": ["syllabus"],
+        "실습": ["syllabus", "academics"], "교수": ["syllabus", "academics"],
+        "이메일": ["syllabus"], "상담": ["syllabus"], "주차": ["syllabus"],
+        "강의실": ["syllabus", "schedule"],
+        "강의개요": ["syllabus"], "강의목표": ["syllabus"],
+        "강의": ["syllabus", "schedule"],
+    }
     categories = set()
-    for keyword, cats in QUESTION_CATEGORY_MAP.items():
+    for keyword, cats in keyword_map.items():
         if keyword in question:
             categories.update(cats)
 
@@ -140,7 +228,7 @@ def _classify_question(question: str) -> set[str]:
         categories = {"briefing", "academics", "profile", "schedule"}
     if categories & _BRIEFING_RELEVANT:
         categories.add("briefing")
-    return categories
+    return categories, None
 
 
 def _extract_course_names(question: str, context_courses: list[str]) -> list[str]:
@@ -167,16 +255,24 @@ def _get_course_names() -> list[str]:
         return []
 
 
-def _smart_filter(rel_path: str, data: list, question: str, course_names: list[str]) -> list:
-    """리스트 데이터를 질문 관련성으로 필터링한다."""
-    mentioned = _extract_course_names(question, course_names)
+def _smart_filter(rel_path: str, data: list, question: str, course_names: list[str],
+                  mentioned_course: str | None = None) -> list:
+    """리스트 데이터를 질문 관련성으로 필터링한다.
+
+    Args:
+        mentioned_course: LLM이 추출한 과목명. None이면 키워드 fallback으로 추출.
+    """
+    if mentioned_course is not None:
+        mentioned = [mentioned_course]
+    else:
+        # [LEGACY] 키워드 기반 과목 추출 — LLM 분류 실패 시 fallback
+        mentioned = _extract_course_names(question, course_names)
 
     if "notices" in rel_path:
         if mentioned:
             filtered = [n for n in data if any(m in n.get("course_name", "") or m in n.get("title", "") for m in mentioned)]
             if filtered:
                 return filtered
-        today_iso = date.today().isoformat()
         week_ago = (date.today() - timedelta(days=7)).isoformat()
         recent = [n for n in data if n.get("date", "") >= week_ago]
         return recent if recent else data[:20]
@@ -212,7 +308,8 @@ def _smart_filter(rel_path: str, data: list, question: str, course_names: list[s
 
 
 def _load_context(categories: set[str], question: str = "",
-                  max_chars: int = MAX_CONTEXT_CHARS) -> str:
+                  max_chars: int = MAX_CONTEXT_CHARS,
+                  mentioned_course: str | None = None) -> str:
     """normalized 데이터를 토큰 예산 내에서 로드한다."""
     course_names = _get_course_names()
 
@@ -237,7 +334,8 @@ def _load_context(categories: set[str], question: str = "",
         else:
             data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, list) and question:
-                data = _smart_filter(rel_path, data, question, course_names)
+                data = _smart_filter(rel_path, data, question, course_names,
+                                     mentioned_course=mentioned_course)
             if isinstance(data, list) and len(data) == 0:
                 continue
             if "student" in rel_path:
@@ -274,8 +372,8 @@ def _extract_text(response) -> str:
 
 def _ask(client: Anthropic, question: str, history: list[dict],
          web_search: bool = True) -> str:
-    categories = _classify_question(question)
-    context = _load_context(categories, question)
+    categories, mentioned_course = _classify_question(question, client)
+    context = _load_context(categories, question, mentioned_course=mentioned_course)
 
     if not context:
         return "[에러] normalized 데이터가 없습니다. 먼저 python main.py 를 실행하세요."
@@ -291,6 +389,7 @@ def _ask(client: Anthropic, question: str, history: list[dict],
         max_tokens=4096,
         system=system,
         messages=history,
+        temperature=0,
     )
     if tools:
         kwargs["tools"] = tools

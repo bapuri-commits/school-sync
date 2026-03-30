@@ -2,11 +2,12 @@
 
 import re
 from config import BASE_URL
+from browser import safe_goto
 
 
 async def extract_courses(page) -> list[dict]:
     """대시보드에서 수강 과목 목록을 추출한다."""
-    await page.goto(f"{BASE_URL}/", wait_until="networkidle")
+    await safe_goto(page, f"{BASE_URL}/")
 
     courses = await page.evaluate("""
         () => {

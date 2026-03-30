@@ -24,8 +24,8 @@ except Exception as e:
     def _build_system_prompt(web_search_enabled: bool = True) -> str:
         return "AI Q&A 모듈 로드에 실패했습니다."
 
-    def _classify_question(question: str) -> set[str]:
-        return set()
+    def _classify_question(question: str, client=None) -> tuple:
+        return set(), None
 
     def _load_context(categories: set[str], question: str = "", max_chars: int = 30000) -> str:
         return ""

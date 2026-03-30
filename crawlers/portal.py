@@ -3,8 +3,8 @@
 인증 불필요 (공개 페이지).
 """
 
-from browser import BrowserSession
-from config import OUTPUT_DIR, SITES, GOTO_TIMEOUT_MS
+from browser import BrowserSession, safe_goto
+from config import OUTPUT_DIR, SITES
 from crawlers.base import BaseCrawler
 from utils import save_json
 
@@ -57,7 +57,7 @@ class PortalCrawler(BaseCrawler):
         all_posts = []
         for page_idx in range(1, max_pages + 1):
             url = f"{BASE_URL}/article/{board_code}/list?pageIndex={page_idx}"
-            await page.goto(url, wait_until="networkidle", timeout=GOTO_TIMEOUT_MS)
+            await safe_goto(page, url)
 
             posts = await page.evaluate("""
                 (boardCode) => {
@@ -129,7 +129,7 @@ class PortalCrawler(BaseCrawler):
         """학사일정 페이지에서 일정 목록을 추출한다."""
         seq = _portal_cfg.get("schedule_info_seq", 22)
         url = f"{BASE_URL}/schedule/detail?schedule_info_seq={seq}"
-        await page.goto(url, wait_until="networkidle", timeout=GOTO_TIMEOUT_MS)
+        await safe_goto(page, url)
 
         events = await page.evaluate("""
             () => {
