@@ -26,7 +26,8 @@ NORM_DIR = OUTPUT_DIR / "normalized"
 
 WEEKDAY_KR = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
 
-MAX_CONTEXT_CHARS = 30_000
+MAX_CONTEXT_CHARS = 80_000
+MAX_HISTORY_TURNS = 6
 
 WEB_SEARCH_TOOL = {
     "type": "web_search_20250305",
@@ -52,7 +53,7 @@ DATA_FILES = {
     "info/notices.json":                      ("공지사항",                         "info",      45),
     "profile/student.json":                   ("학적 프로필 (이름/학과/학점)",       "profile",   5),
     "profile/grade_history.json":             ("전체 성적 이력 (nDRIMS)",           "profile",   50),
-    "profile/graduation_requirements.json":   ("졸업 요건 (데이터사이언스전공 2023학번)", "profile", 8),
+    "curriculum/curriculum.md":               ("교육과정/졸업요건/이수체계",          "curriculum", 8),
 }
 
 # [LEGACY] 키워드 매칭 기반 분류 — LLM 분류 실패 시 fallback으로 사용
@@ -85,6 +86,9 @@ DATA_FILES = {
 _AVAILABLE_CATEGORIES = sorted({cat for _, cat, _ in DATA_FILES.values()})
 
 _BRIEFING_RELEVANT = {"academics", "schedule", "info"}
+
+_file_cache: dict[str, object] = {}
+_course_names_cache: list[str] | None = None
 
 # ──────────────────────────────────────────────
 #  System Prompt
@@ -126,25 +130,26 @@ def _build_system_prompt(web_search_enabled: bool = True) -> str:
 _CATEGORY_DESCRIPTIONS = {
     "academics": "수강 과목, 과제, 마감, 출석, 성적, 퀴즈, 제출",
     "briefing": "오늘의 브리핑, 일일 요약",
+    "curriculum": "교육과정, 졸업요건, 이수체계, 필수과목, 전공학점, 교양학점, 마이크로디그리, 선후수과목",
     "info": "공지사항, 장학, 안내, 공모전, 특강",
-    "profile": "학적 프로필, 전체 성적 이력, 졸업 요건, 학과, 학번, GPA",
+    "profile": "학적 프로필, 전체 성적 이력, 학과, 학번, GPA",
     "schedule": "시간표, 캘린더, 학사일정, 개강, 종강, 시험, 중간/기말",
     "syllabus": "강의계획서, 교재, 교수 정보, 수업 주차, 강의개요/목표",
 }
 
 
-def _classify_question(question: str, client=None) -> tuple[set[str], str | None]:
-    """LLM 기반 질문 분류 + 과목 추출. 실패 시 키워드 fallback.
+def _classify_question(question: str) -> tuple[set[str], str | None]:
+    """키워드 기반 질문 분류 + 과목명 직접 매칭.
 
     Returns:
         (categories, mentioned_course): 카테고리 집합과 언급된 과목명(없으면 None).
     """
-    if client is not None:
-        try:
-            return _classify_question_llm(question, client)
-        except Exception:
-            pass
-    return _classify_question_keyword(question)
+    categories, _ = _classify_question_keyword(question)
+    course_names = _get_course_names()
+    for name in course_names:
+        if name in question:
+            return categories, name
+    return categories, None
 
 
 def _classify_question_llm(question: str, client) -> tuple[set[str], str | None]:
@@ -190,13 +195,18 @@ def _classify_question_keyword(question: str) -> tuple[set[str], None]:
         "레포트": ["academics"], "제출": ["academics"],
         "성적": ["academics", "profile"], "학점": ["academics", "profile"],
         "평점": ["academics", "profile"], "GPA": ["academics", "profile"],
-        "졸업": ["profile", "schedule"], "프로필": ["profile"],
-        "학과": ["profile"], "학번": ["profile"], "이수": ["profile"],
+        "졸업": ["curriculum", "profile"], "프로필": ["profile"],
+        "학과": ["profile"], "학번": ["profile"], "이수": ["curriculum", "profile"],
+        "교육과정": ["curriculum"], "커리큘럼": ["curriculum"], "필수과목": ["curriculum"],
+        "전공학점": ["curriculum"], "교양학점": ["curriculum"], "선수과목": ["curriculum"],
+        "후수과목": ["curriculum"], "이수체계": ["curriculum"], "졸업요건": ["curriculum"],
+        "마이크로디그리": ["curriculum"], "TOEIC": ["curriculum"],
+        "종합설계": ["curriculum"], "심화과정": ["curriculum"],
         "시간표": ["schedule"], "캘린더": ["schedule"], "일정": ["schedule"],
         "학사일정": ["schedule"], "개강": ["schedule"], "종강": ["schedule"],
         "방학": ["schedule"], "휴강": ["schedule"], "보강": ["schedule"],
-        "중간고사": ["schedule"], "기말고사": ["schedule"],
-        "중간": ["schedule"], "기말": ["schedule"],
+        "중간고사": ["schedule", "syllabus"], "기말고사": ["schedule", "syllabus"],
+        "중간": ["schedule", "syllabus"], "기말": ["schedule", "syllabus"],
         "시험": ["schedule", "syllabus"],
         "수강": ["academics", "schedule"], "수업": ["schedule", "academics"],
         "공지": ["info"], "장학": ["info"], "안내": ["info"],
@@ -270,6 +280,14 @@ def _get_course_names() -> list[str]:
         return []
 
 
+def _detect_course(question: str) -> str | None:
+    """질문에서 수강 과목명을 감지한다."""
+    for name in _get_course_names():
+        if name in question:
+            return name
+    return None
+
+
 def _smart_filter(rel_path: str, data: list, question: str, course_names: list[str],
                   mentioned_course: str | None = None) -> list:
     """리스트 데이터를 질문 관련성으로 필터링한다.
@@ -322,10 +340,11 @@ def _smart_filter(rel_path: str, data: list, question: str, course_names: list[s
     return data
 
 
-def _load_context(categories: set[str], question: str = "",
+def _load_context(categories: set[str],
+                  question: str = "",
                   max_chars: int = MAX_CONTEXT_CHARS,
                   mentioned_course: str | None = None) -> str:
-    """normalized 데이터를 토큰 예산 내에서 로드한다."""
+    """카테고리에 해당하는 데이터를 우선순위 순으로 토큰 예산 내에서 로드한다."""
     course_names = _get_course_names()
 
     candidates = []
@@ -387,17 +406,37 @@ def _extract_text(response) -> str:
     return "\n".join(parts)
 
 
+def _trim_history(history: list[dict]) -> list[dict]:
+    """최근 N턴만 유지하여 토큰 폭주를 방지한다."""
+    max_items = MAX_HISTORY_TURNS * 2
+    if len(history) > max_items:
+        return history[-max_items:]
+    return history
+
+
 def _ask(client: Anthropic, question: str, history: list[dict],
          web_search: bool = True) -> str:
-    categories, mentioned_course = _classify_question(question, client)
-    context = _load_context(categories, question, mentioned_course=mentioned_course)
+    categories, mentioned_course = _classify_question(question)
+    context = _load_context(categories, question=question, mentioned_course=mentioned_course)
 
     if not context:
-        return "[에러] normalized 데이터가 없습니다. 먼저 python main.py 를 실행하세요."
+        msg = "[에러] normalized 데이터가 없습니다. 먼저 python main.py 를 실행하세요."
+        print(msg)
+        return msg
 
-    system = _build_system_prompt(web_search_enabled=web_search) + "\n\n" + context
+    system = [
+        {
+            "type": "text",
+            "text": _build_system_prompt(web_search_enabled=web_search) + "\n\n" + context,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
 
-    history.append({"role": "user", "content": question})
+    today = date.today()
+    weekday = WEEKDAY_KR[today.weekday()]
+    tagged_question = f"[오늘: {today.isoformat()} {weekday}] {question}"
+    history.append({"role": "user", "content": tagged_question})
+    trimmed = _trim_history(history)
 
     tools = [WEB_SEARCH_TOOL] if web_search else None
 
@@ -405,19 +444,20 @@ def _ask(client: Anthropic, question: str, history: list[dict],
         model="claude-sonnet-4-20250514",
         max_tokens=4096,
         system=system,
-        messages=history,
+        messages=trimmed,
         temperature=0,
     )
     if tools:
         kwargs["tools"] = tools
 
-    response = client.messages.create(**kwargs)
+    with client.messages.stream(**kwargs) as stream:
+        for text in stream.text_stream:
+            print(text, end="", flush=True)
+        response = stream.get_final_message()
+    print()
 
-    # web_search_20250305는 서버사이드 실행이라 보통 stop_reason="end_turn"으로 직접 반환됨.
-    # 아래 루프는 클라이언트사이드 도구 추가 시를 대비한 안전장치.
-    max_rounds = 5
     rounds = 0
-    while response.stop_reason == "tool_use" and rounds < max_rounds:
+    while response.stop_reason == "tool_use" and rounds < 5:
         rounds += 1
         history.append({"role": "assistant", "content": response.content})
 
@@ -433,7 +473,12 @@ def _ask(client: Anthropic, question: str, history: list[dict],
         if tool_results:
             history.append({"role": "user", "content": tool_results})
 
-        response = client.messages.create(**kwargs)
+        kwargs["messages"] = _trim_history(history)
+        with client.messages.stream(**kwargs) as stream:
+            for text in stream.text_stream:
+                print(text, end="", flush=True)
+            response = stream.get_final_message()
+        print()
 
     answer = _extract_text(response)
     history.append({"role": "assistant", "content": response.content})
@@ -460,8 +505,7 @@ def main():
     web_search = not args.no_search
 
     if args.question:
-        answer = _ask(client, args.question, history, web_search=web_search)
-        print(answer)
+        _ask(client, args.question, history, web_search=web_search)
         return
 
     search_label = "웹검색 ON" if web_search else "웹검색 OFF"
@@ -483,8 +527,8 @@ def main():
             break
 
         try:
-            answer = _ask(client, question, history, web_search=web_search)
-            print(f"\n{answer}")
+            print()
+            _ask(client, question, history, web_search=web_search)
         except Exception as e:
             print(f"\n[에러] {e}")
 

@@ -56,6 +56,11 @@ def save_normalized(output: NormalizedOutput) -> None:
     if output.grade_history:
         _write_raw(NORM_DIR / "profile" / "grade_history.json", output.grade_history)
 
+    if output.curriculum_md:
+        curriculum_dir = NORM_DIR / "curriculum"
+        curriculum_dir.mkdir(parents=True, exist_ok=True)
+        (curriculum_dir / "curriculum.md").write_text(output.curriculum_md, encoding="utf-8")
+
     _cleanup_legacy()
 
 

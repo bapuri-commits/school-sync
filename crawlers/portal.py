@@ -75,8 +75,27 @@ class PortalCrawler(BaseCrawler):
                         if (!linkEl) return;
 
                         const titleEl = el.querySelector('p.tit, .title, .subject, td.title a, a');
-                        const title = titleEl ? titleEl.innerText.trim() : '';
-                        if (!title) return;
+                        let rawTitle = titleEl ? titleEl.innerText.trim() : '';
+                        if (!rawTitle) return;
+
+                        // p.tit의 innerText에 배지/카테고리/날짜/조회수가 혼입됨 — 실제 제목만 추출
+                        let title = rawTitle;
+                        const lines = rawTitle.split('\\n').map(l => l.trim()).filter(l => l);
+                        if (lines.length >= 3) {
+                            // 패턴: [공지|번호] / [카테고리] / [제목] / [날짜. 조회 N]
+                            const cleaned = lines.filter(l =>
+                                !/^공지$|^\\d+$/.test(l) &&
+                                !/^\\d{4}\\.\\d{2}\\.\\d{2}/.test(l) &&
+                                !/조회\\s*\\d/.test(l)
+                            );
+                            // 카테고리(cateEl에서 별도 추출)와 동일한 줄도 제거
+                            const cateText = el.querySelector('.top em, .category, .cate');
+                            const cateName = cateText ? cateText.innerText.trim() : '';
+                            const finalLines = cateName
+                                ? cleaned.filter(l => l !== cateName)
+                                : cleaned;
+                            title = finalLines.join(' ').trim() || rawTitle;
+                        }
 
                         let articleId = '';
                         const onclick = linkEl.getAttribute('onclick') || '';

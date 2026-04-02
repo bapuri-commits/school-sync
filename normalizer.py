@@ -511,11 +511,12 @@ def _normalize_ndrims_timetable(tt_raw: dict) -> list[TimetableEntry]:
 
 
 def _normalize_dept_notices(dept_raw: dict) -> list[Notice]:
-    """학과 공지를 Notice 모델로 변환한다."""
+    """학과 공지를 Notice 모델로 변환한다. 본문/첨부파일 포함."""
     results = []
     boards = {
         "notices": ("학과공지", "학과"),
         "external_notices": ("특강/공모전/취업", "특강/공모전"),
+        "college_data": ("학사자료", "학사자료"),
     }
     for key, (board_name, category) in boards.items():
         notices = dept_raw.get(key, [])
@@ -530,8 +531,69 @@ def _normalize_dept_notices(dept_raw: dict) -> list[Notice]:
                     url=post.get("url", ""),
                     category=category,
                     source_site="department",
+                    body=post.get("_body", ""),
+                    attachments=post.get("_attachments", []),
                 ))
     return results
+
+
+def _table_to_markdown(table: list[list[dict]]) -> str:
+    """크롤링된 테이블 데이터를 마크다운 테이블로 변환한다."""
+    if not table:
+        return ""
+    max_cols = max(sum(c.get("colspan", 1) for c in row) for row in table)
+    lines = []
+    for i, row in enumerate(table):
+        cells = []
+        for cell in row:
+            text = cell.get("text", "").replace("|", "\\|")[:100]
+            cells.append(text)
+            for _ in range(cell.get("colspan", 1) - 1):
+                cells.append("")
+        while len(cells) < max_cols:
+            cells.append("")
+        lines.append("| " + " | ".join(cells[:max_cols]) + " |")
+        if i == 0:
+            lines.append("| " + " | ".join(["---"] * max_cols) + " |")
+    return "\n".join(lines)
+
+
+def _normalize_curriculum_pages(pages_raw: dict) -> str:
+    """학과 정적 페이지 raw 데이터를 구조화된 마크다운으로 변환한다."""
+    MIN_TEXT_LEN = 50
+
+    sections = []
+    for key, page_data in pages_raw.items():
+        if not isinstance(page_data, dict) or "_error" in page_data:
+            continue
+        title = page_data.get("title", key)
+        tabs = page_data.get("tabs", [])
+        if not tabs:
+            continue
+
+        section_parts = [f"# {title}\n"]
+        for tab in tabs:
+            tab_name = tab.get("name", "")
+            text = tab.get("text", "")
+            tables = tab.get("tables", [])
+
+            if len(text) < MIN_TEXT_LEN and not tables:
+                continue
+
+            section_parts.append(f"## {tab_name}\n")
+
+            if text:
+                clean = text[:5000]
+                section_parts.append(clean + "\n")
+
+            for j, table in enumerate(tables):
+                md_table = _table_to_markdown(table)
+                if md_table:
+                    section_parts.append(md_table + "\n")
+
+        sections.append("\n".join(section_parts))
+
+    return "\n---\n\n".join(sections)
 
 
 def normalize(semester: str = "") -> NormalizedOutput:
@@ -569,6 +631,12 @@ def normalize(semester: str = "") -> NormalizedOutput:
     if dept_raw:
         notices.extend(_normalize_dept_notices(dept_raw))
 
+    # --- department: 정적 페이지 (교육과정/졸업요건) ---
+    curriculum_md = ""
+    pages_raw = _load_json(RAW_DEPT / "pages.json")
+    if pages_raw:
+        curriculum_md = _normalize_curriculum_pages(pages_raw)
+
     # --- ndrims ---
     student_profile = None
     ndrims_grade_history = []
@@ -597,6 +665,7 @@ def normalize(semester: str = "") -> NormalizedOutput:
         syllabus=syllabus,
         grade_history=ndrims_grade_history,
         student_profile=student_profile,
+        curriculum_md=curriculum_md,
     )
 
     from normalizer_storage import save_normalized

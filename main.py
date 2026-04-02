@@ -30,7 +30,7 @@ from crawlers.portal import PortalCrawler
 from crawlers.department import DepartmentCrawler
 from crawlers.ndrims import NdrimsCrawler
 from normalizer import normalize
-from context_export import export_all as export_context
+from context_export import export_all as export_context, export_claude_all
 
 
 CRAWLERS = {
@@ -111,6 +111,7 @@ async def run(args):
     if args.normalize_only:
         normalize()
         export_context()
+        export_claude_all()
         return
 
     sites = _resolve_sites(args)
@@ -133,7 +134,8 @@ async def run(args):
 
         session = None
         try:
-            session = await create_session(headless=True, site=site_name)
+            headless = site_name != "ndrims"
+            session = await create_session(headless=headless, site=site_name)
 
             if site_name == "eclass":
                 await crawler.crawl(
@@ -159,6 +161,7 @@ async def run(args):
     if _should_normalize(args):
         normalize()
         export_context()
+        export_claude_all()
 
     _write_run_log(sites, args)
 

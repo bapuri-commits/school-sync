@@ -168,3 +168,4 @@ class NormalizedOutput(BaseModel):
     syllabus: list[SyllabusEntry] = []
     grade_history: list[dict] = []
     student_profile: StudentProfile | None = None
+    curriculum_md: str = ""

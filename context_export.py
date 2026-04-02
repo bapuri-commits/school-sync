@@ -18,6 +18,7 @@ from config import OUTPUT_DIR
 
 NORM_DIR = OUTPUT_DIR / "normalized"
 CONTEXT_DIR = OUTPUT_DIR / "context"
+CLAUDE_DIR = OUTPUT_DIR / "claude"
 
 
 def export_all(target_date: date | None = None) -> int:
@@ -141,14 +142,15 @@ def get_week_topic(course: str, target_date: str) -> tuple[int, str] | None:
     if semester_start:
         try:
             target = date.fromisoformat(target_date)
-            week_num = max(1, (target - semester_start).days // 7 + 1)
+            week_num = max(1, min((target - semester_start).days // 7 + 1, weekly_plan[-1]["week"]))
             for wp in weekly_plan:
                 if wp["week"] == week_num:
                     return (week_num, wp["topic"])
+            return (week_num, "")
         except ValueError:
             pass
 
-    return (weekly_plan[-1]["week"], weekly_plan[-1]["topic"])
+    return None
 
 
 # ──────────────────────────────────────────────
@@ -178,21 +180,26 @@ def _find_course_syllabus(course: str) -> dict | None:
 
 
 def _estimate_semester_start() -> date | None:
-    """학사일정에서 학기 시작일을 추정한다."""
+    """학사일정에서 학기 시작일을 추정한다. 실패 시 config 기반 fallback."""
     schedule = _load_json(NORM_DIR / "schedule" / "academic_schedule.json")
-    if not schedule or not isinstance(schedule, list):
-        return None
+    if schedule and isinstance(schedule, list):
+        for item in schedule:
+            title = item.get("title", "")
+            if re.search(r"수업\s*시작|개강|학기\s*시작", title):
+                start = item.get("start_date", "")
+                if start:
+                    try:
+                        return date.fromisoformat(start)
+                    except ValueError:
+                        pass
 
-    for item in schedule:
-        title = item.get("title", "")
-        if re.search(r"수업\s*시작|개강|학기\s*시작", title):
-            start = item.get("start_date", "")
-            if start:
-                try:
-                    return date.fromisoformat(start)
-                except ValueError:
-                    pass
-    return None
+    from config import CURRENT_SEMESTER
+    try:
+        year, sem = CURRENT_SEMESTER.split("-")
+        month = 3 if sem == "1" else 9
+        return date(int(year), month, 2)
+    except (ValueError, AttributeError):
+        return None
 
 
 def _build_frontmatter(course: str, target_date: date | None = None) -> str:
@@ -339,6 +346,218 @@ def _build_materials_section(course: str) -> str:
     for f in data:
         dl_at = f.get("downloaded_at", "")[:10]
         lines.append(f"| {f.get('filename', '?')} | {f.get('size_kb', '?')}KB | {dl_at} |")
+
+    return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────
+#  Claude Projects Export
+# ──────────────────────────────────────────────
+
+def export_claude_all(target_date: date | None = None) -> int:
+    """모든 수강 과목의 Claude Projects용 컨텍스트를 생성한다.
+
+    Args:
+        target_date: 컨텍스트 기준 날짜. None이면 오늘.
+
+    Returns:
+        생성된 파일 수.
+    """
+    ref = target_date or date.today()
+    courses = _load_json(NORM_DIR / "academics" / "courses.json")
+    if not courses:
+        print("[claude_export] courses.json이 없습니다. 정규화를 먼저 실행하세요.")
+        return 0
+
+    course_names = sorted({c["short_name"] for c in courses if c.get("short_name")})
+    if not course_names:
+        print("[claude_export] 수강 과목이 없습니다.")
+        return 0
+
+    CLAUDE_DIR.mkdir(parents=True, exist_ok=True)
+
+    print(f"\n{'─'*40}")
+    print(f"  Claude Projects 컨텍스트 생성 (기준일: {ref})")
+    print(f"{'─'*40}")
+
+    generated = 0
+    for name in course_names:
+        content = build_claude_context(name, target_date=ref)
+        if content:
+            path = CLAUDE_DIR / f"{name}.md"
+            path.write_text(content, encoding="utf-8")
+            generated += 1
+            print(f"  ✓ {name}")
+        else:
+            print(f"  - {name} (데이터 없음, 건너뜀)")
+
+    print(f"  → {generated}/{len(course_names)}개 과목 → {CLAUDE_DIR}/")
+    return generated
+
+
+def export_claude_course(course: str, target_date: date | None = None) -> Path | None:
+    """특정 과목의 Claude Projects용 컨텍스트를 (재)생성한다.
+
+    Args:
+        course: 과목 short_name.
+        target_date: 컨텍스트 기준 날짜. None이면 오늘.
+
+    Returns:
+        생성된 파일 경로 또는 None.
+    """
+    ref = target_date or date.today()
+    CLAUDE_DIR.mkdir(parents=True, exist_ok=True)
+
+    content = build_claude_context(course, target_date=ref)
+    if not content:
+        return None
+
+    path = CLAUDE_DIR / f"{course}.md"
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def build_claude_context(course: str, target_date: date | None = None) -> str:
+    """Claude Projects에 최적화된 과목 컨텍스트 마크다운을 생성한다.
+
+    NotebookLM용과 달리:
+    - 마감 임박 과제를 날짜순 정렬로 상단 배치
+    - 수업자료 섹션에서 신규 파일 강조 표시
+
+    Args:
+        course: 과목 short_name.
+        target_date: 컨텍스트 기준 날짜. None이면 오늘.
+    """
+    ref = target_date or date.today()
+
+    if not NORM_DIR.exists():
+        return ""
+
+    sections: list[str] = []
+
+    syllabus_md = _build_syllabus_section(course)
+    if syllabus_md:
+        sections.append(syllabus_md)
+
+    assignments_md = _build_claude_assignments_section(course, ref)
+    if assignments_md:
+        sections.append(assignments_md)
+
+    notices_md = _build_notices_section(course, ref)
+    if notices_md:
+        sections.append(notices_md)
+
+    materials_md = _build_claude_materials_section(course)
+    if materials_md:
+        sections.append(materials_md)
+
+    if not sections:
+        return ""
+
+    frontmatter = _build_frontmatter(course, ref)
+    header = (
+        f"# {course} 학습 컨텍스트\n\n"
+        "> Claude Projects용 — 개념 학습과 과제 대응에 활용하세요.\n"
+        "> 강의자료(PDF/PPT)는 별도로 Project Knowledge에 업로드하세요.\n"
+    )
+    body = "\n---\n\n".join(sections)
+
+    return f"{frontmatter}\n\n{header}\n{body}\n"
+
+
+def _build_claude_assignments_section(course: str, target_date: date | None = None) -> str:
+    """Claude Projects용 과제/마감 섹션 — 마감일 오름차순 정렬."""
+    ref = target_date or date.today()
+    parts: list[str] = []
+
+    assignments = _load_json(NORM_DIR / "academics" / "assignments.json")
+    if assignments and isinstance(assignments, list):
+        matched = [a for a in assignments if course in a.get("course_name", "")]
+        if matched:
+            matched.sort(key=lambda a: a.get("deadline", "") or "9999-99-99")
+            lines = ["## 과제/활동\n"]
+            for a in matched:
+                deadline = a.get("deadline", "")
+                suffix = f" (마감: {deadline})" if deadline else ""
+                lines.append(f"- **{a.get('title', '?')}**{suffix}")
+                if a.get("info"):
+                    lines.append(f"  - {a['info']}")
+            parts.append("\n".join(lines))
+
+    deadlines = _load_json(NORM_DIR / "academics" / "deadlines.json")
+    if deadlines and isinstance(deadlines, list):
+        matched = [d for d in deadlines if course in d.get("course_name", "")]
+        if matched:
+            matched.sort(key=lambda d: d.get("due_at", "") or "9999-99-99")
+            lines = ["## 마감 일정\n"]
+            for d in matched:
+                due = d.get("due_at", "?")
+                is_soon = _is_soon(due, ref)
+                marker = " ⚠️" if is_soon else ""
+                lines.append(
+                    f"- {due}{marker} | {d.get('title', '?')} ({d.get('source', '')})"
+                )
+            parts.append("\n".join(lines))
+
+    return "\n\n".join(parts)
+
+
+def _is_soon(due_str: str, ref: date, days: int = 7) -> bool:
+    """마감일이 ref 기준 days일 이내인지 확인한다."""
+    try:
+        due = datetime.fromisoformat(due_str.replace("Z", "+00:00")).date()
+        return ref <= due <= ref + timedelta(days=days)
+    except (ValueError, AttributeError):
+        return False
+
+
+def _build_claude_materials_section(course: str) -> str:
+    """Claude Projects용 수업자료 섹션 — 신규 파일을 [NEW]로 강조한다.
+
+    마지막 export 시각(CLAUDE_DIR/{course}.md mtime)과 manifest의
+    downloaded_at을 비교해 신규 파일을 식별한다.
+    """
+    downloads_dir = OUTPUT_DIR / "downloads"
+    course_dirs = [
+        d for d in downloads_dir.iterdir()
+        if d.is_dir() and course in d.name
+    ] if downloads_dir.exists() else []
+
+    if not course_dirs:
+        return ""
+
+    manifest_path = course_dirs[0] / "manifest.json"
+    data = _load_json(manifest_path)
+    if not data or not isinstance(data, list):
+        return ""
+
+    last_export_dt: datetime | None = None
+    claude_file = CLAUDE_DIR / f"{course}.md"
+    if claude_file.exists():
+        last_export_dt = datetime.fromtimestamp(claude_file.stat().st_mtime)
+
+    lines = ["## 수업자료 파일 목록\n"]
+    lines.append("> [NEW] 표시 파일은 Claude Projects에 아직 업로드되지 않았을 수 있습니다.\n")
+    lines.append("| 파일명 | 크기 | 다운로드 일시 | |")
+    lines.append("|--------|------|-------------|---|")
+
+    for f in data:
+        dl_at_str = f.get("downloaded_at", "")
+        dl_at_display = dl_at_str[:10]
+        is_new = False
+        if last_export_dt and dl_at_str:
+            try:
+                dl_dt = datetime.fromisoformat(dl_at_str.replace("Z", "+00:00"))
+                if dl_dt.tzinfo is not None:
+                    dl_dt = dl_dt.replace(tzinfo=None)
+                is_new = dl_dt > last_export_dt
+            except ValueError:
+                pass
+        elif not last_export_dt:
+            is_new = True
+
+        badge = "**[NEW]**" if is_new else ""
+        lines.append(f"| {f.get('filename', '?')} | {f.get('size_kb', '?')}KB | {dl_at_display} | {badge} |")
 
     return "\n".join(lines)
 

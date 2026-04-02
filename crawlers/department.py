@@ -1,9 +1,10 @@
 """
-학과 사이트 크롤러 — 공지사항 + 학사자료, 본문 + 첨부파일 포함.
+학과 사이트 크롤러 — 공지사항 + 학사자료 + 정적 페이지(교육과정/졸업요건).
 인증 불필요 (공개 페이지).
 """
 
 import asyncio
+import json
 
 from browser import BrowserSession, safe_goto
 from config import OUTPUT_DIR, SITES, REQUEST_DELAY
@@ -17,6 +18,13 @@ DL_DIR = OUTPUT_DIR / "downloads" / "department"
 _dept_cfg = SITES.get("department", {})
 BASE_URL = _dept_cfg.get("base_url", "https://ai.dongguk.edu")
 
+STATIC_PAGES = [
+    {"key": "curriculum_2023", "url": f"{BASE_URL}/page/30427", "label": "전공교육과정(2023)", "follow_subpages": True},
+    {"key": "curriculum_2026", "url": f"{BASE_URL}/page/32267", "label": "전공교육과정(2026)", "follow_subpages": True},
+    {"key": "micro_degree", "url": f"{BASE_URL}/page/2836", "label": "마이크로디그리"},
+    {"key": "dept_intro", "url": f"{BASE_URL}/page/31627", "label": "컴퓨터AI학부 소개"},
+]
+
 
 class DepartmentCrawler(BaseCrawler):
     site_name = "department"
@@ -24,10 +32,33 @@ class DepartmentCrawler(BaseCrawler):
     def requires_auth(self) -> bool:
         return False
 
+    def _load_previous_raw(self) -> dict:
+        """이전 크롤링의 raw 데이터에서 URL→body/attachments 맵을 구성한다."""
+        body_map: dict[str, dict] = {}
+        raw_path = RAW_DIR / "notices.json"
+        if raw_path.exists():
+            try:
+                prev = json.loads(raw_path.read_text(encoding="utf-8"))
+                for board_posts in prev.values():
+                    if isinstance(board_posts, list):
+                        for p in board_posts:
+                            url = p.get("url", "")
+                            if url and p.get("_body"):
+                                body_map[url] = {
+                                    "_body": p["_body"],
+                                    "_attachments": p.get("_attachments", []),
+                                }
+            except Exception:
+                pass
+        return body_map
+
     async def crawl(self, session: BrowserSession, **opts) -> dict:
         page = session.page
         result = {}
 
+        prev_body_map = self._load_previous_raw()
+
+        # --- 게시판 크롤링 ---
         default_boards = [
             {"key": "notices", "path": "notice", "label": "학과공지"},
             {"key": "external_notices", "path": "notice2", "label": "특강/공모전/취업"},
@@ -38,7 +69,8 @@ class DepartmentCrawler(BaseCrawler):
         for b in boards:
             key, path, label = b["key"], b["path"], b["label"]
             try:
-                posts = await self._extract_notices(page, board_path=path, board_label=label)
+                posts = await self._extract_notices(page, board_path=path, board_label=label,
+                                                    prev_body_map=prev_body_map)
                 result[key] = posts
             except Exception as e:
                 print(f"  [에러] {label} 추출 실패: {e}")
@@ -52,10 +84,118 @@ class DepartmentCrawler(BaseCrawler):
                 body_count = sum(1 for p in result[key] if p.get("_body"))
                 print(f"  [{label}] {count}개 (본문 {body_count}개)")
 
+        # --- 정적 페이지 크롤링 ---
+        pages_result = {}
+        for sp in STATIC_PAGES:
+            try:
+                page_data = await self._scrape_static_page(page, sp["url"], sp["label"])
+
+                if sp.get("follow_subpages"):
+                    subpages = await self._discover_subpages(page, sp["url"])
+                    for sub_url, sub_label in subpages:
+                        sub_data = await self._scrape_static_page(page, sub_url, sub_label)
+                        page_data["tabs"].extend(sub_data.get("tabs", []))
+                        for t in sub_data.get("tabs", []):
+                            t["name"] = f"{sub_label} > {t['name']}" if t["name"] != "전체" else sub_label
+
+                pages_result[sp["key"]] = page_data
+                tab_count = len(page_data.get("tabs", []))
+                table_count = sum(len(t.get("tables", [])) for t in page_data.get("tabs", []))
+                print(f"  [{sp['label']}] 서브페이지 {tab_count}개, 테이블 {table_count}개")
+            except Exception as e:
+                print(f"  [에러] {sp['label']} 추출 실패: {e}")
+                pages_result[sp["key"]] = {"_error": str(e)}
+
+        save_json(pages_result, RAW_DIR / "pages.json")
+
         print(f"\n[department] 완료")
         return result
 
-    async def _extract_notices(self, page, board_path: str = "notice", board_label: str = "학과공지", max_pages: int = 2) -> list[dict]:
+    async def _discover_subpages(self, page, parent_url: str) -> list[tuple[str, str]]:
+        """depth3 네비게이션에서 현재 페이지의 하위 페이지 URL을 수집한다."""
+        await safe_goto(page, parent_url)
+        subpages = await page.evaluate("""(parentUrl) => {
+            const results = [];
+            const links = document.querySelectorAll('.depth3 a');
+            links.forEach(a => {
+                const href = a.href || '';
+                const text = a.innerText.trim();
+                if (href && text && href !== parentUrl && !href.endsWith('#') && href.includes('/page/')) {
+                    results.push([href, text]);
+                }
+            });
+            return results;
+        }""", parent_url)
+        return [(url, label) for url, label in subpages]
+
+    async def _scrape_static_page(self, page, url: str, label: str) -> dict:
+        """정적 페이지에서 탭별 텍스트 + 테이블을 추출한다.
+
+        동국대 학과 사이트의 두 가지 탭 구조를 처리:
+        1. .menu_tabs2 li + .tab_contents (jQuery show/hide) — 전공별 교육과정
+        2. 탭 없음 — 전체 본문을 하나의 탭으로
+        """
+        await safe_goto(page, url)
+
+        data = await page.evaluate(r"""() => {
+            const result = { title: document.title, tabs: [] };
+
+            function extractTables(el) {
+                const tables = [];
+                el.querySelectorAll('table').forEach(t => {
+                    const rows = [];
+                    t.querySelectorAll('tr').forEach(tr => {
+                        const cells = [];
+                        tr.querySelectorAll('th, td').forEach(td => {
+                            cells.push({
+                                text: td.innerText.trim().replace(/\n/g, ' '),
+                                colspan: parseInt(td.getAttribute('colspan') || '1'),
+                                rowspan: parseInt(td.getAttribute('rowspan') || '1'),
+                                isHeader: td.tagName === 'TH',
+                            });
+                        });
+                        if (cells.length > 0) rows.push(cells);
+                    });
+                    if (rows.length > 0) tables.push(rows);
+                });
+                return tables;
+            }
+
+            // 패턴 1: .menu_tabs2 + .tab_contents (숨겨진 탭 포함, 전공별)
+            const menuTabs2 = document.querySelectorAll('.menu_tabs2 li a, .menu_tabs.menu_tabs2 li a');
+            const tabContents = document.querySelectorAll('.tab_contents');
+
+            if (menuTabs2.length > 0 && tabContents.length > 0) {
+                menuTabs2.forEach((link, i) => {
+                    const tabName = link.innerText.trim();
+                    if (i < tabContents.length) {
+                        const el = tabContents[i];
+                        result.tabs.push({
+                            name: tabName,
+                            text: el.innerText.trim(),
+                            tables: extractTables(el),
+                        });
+                    }
+                });
+            }
+
+            // 패턴 2: 탭이 없거나 tab_contents 외 본문이 있으면 전체를 추가
+            if (result.tabs.length === 0) {
+                const main = document.querySelector('.contents, #contents, .sub_content, article, main') || document.body;
+                result.tabs.push({
+                    name: '전체',
+                    text: main.innerText.trim(),
+                    tables: extractTables(main),
+                });
+            }
+
+            return result;
+        }""")
+
+        return data
+
+    async def _extract_notices(self, page, board_path: str = "notice", board_label: str = "학과공지",
+                               max_pages: int = 2, prev_body_map: dict | None = None) -> list[dict]:
         """학과 게시판에서 글 목록 + 본문 + 첨부파일을 추출한다."""
         all_posts = []
         for page_idx in range(1, max_pages + 1):
@@ -118,6 +258,8 @@ class DepartmentCrawler(BaseCrawler):
                 unique.append(p)
 
         new_count = 0
+        restored_count = 0
+        prev = prev_body_map or {}
         with CacheBatch() as cache_batch:
             for post in unique:
                 url = post.get("url", "")
@@ -128,10 +270,16 @@ class DepartmentCrawler(BaseCrawler):
                     post["_attachments"] = body_data.get("attachments", [])
                     cache_batch.mark_collected(url, date, content_hash(post.get("_body", "")))
                     new_count += 1
+                elif url in prev:
+                    post["_body"] = prev[url]["_body"]
+                    post["_attachments"] = prev[url]["_attachments"]
+                    restored_count += 1
                 await asyncio.sleep(REQUEST_DELAY)
 
         if new_count > 0:
             print(f"    본문 수집: {new_count}개 (신규/변경)")
+        if restored_count > 0:
+            print(f"    본문 복원: {restored_count}개 (캐시 히트, 이전 데이터)")
 
         return unique
 
