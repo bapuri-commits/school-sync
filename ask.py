@@ -166,7 +166,7 @@ def _classify_question_llm(question: str, client) -> tuple[set[str], str | None]
         '}'
     )
     resp = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-haiku-3-5-20241022",
         max_tokens=150,
         temperature=0,
         messages=[{"role": "user", "content": prompt}],
@@ -243,13 +243,28 @@ def _extract_course_names(question: str, context_courses: list[str]) -> list[str
 #  컨텍스트 로드 (토큰 예산 + 스마트 필터링)
 # ──────────────────────────────────────────────
 
+# 파일 캐시 — 프로세스 생애 1회만 디스크에서 읽는다.
+_file_cache: dict[str, str | list | dict] = {}
+
+
+def _load_file(path, rel_path: str):
+    """파일을 읽어 캐시에 저장하고 반환한다."""
+    if rel_path not in _file_cache:
+        if rel_path.endswith(".md"):
+            _file_cache[rel_path] = path.read_text(encoding="utf-8")
+        else:
+            _file_cache[rel_path] = json.loads(path.read_text(encoding="utf-8"))
+    return _file_cache[rel_path]
+
+
 def _get_course_names() -> list[str]:
     """courses.json에서 과목명 목록을 가져온다."""
-    path = NORM_DIR / "academics" / "courses.json"
+    rel_path = "academics/courses.json"
+    path = NORM_DIR / rel_path
     if not path.exists():
         return []
     try:
-        courses = json.loads(path.read_text(encoding="utf-8"))
+        courses = _load_file(path, rel_path)
         return [c.get("short_name", c.get("name", "")) for c in courses]
     except Exception:
         return []
@@ -328,11 +343,13 @@ def _load_context(categories: set[str], question: str = "",
     total_chars = 0
 
     for priority, rel_path, label, path in candidates:
+        raw = _load_file(path, rel_path)
+
         if rel_path.endswith(".md"):
-            content = path.read_text(encoding="utf-8")
-            section = f"=== {label} ===\n{content}"
+            section = f"=== {label} ===\n{raw}"
         else:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            # 캐시 원본을 보호하기 위해 얕은 복사
+            data = list(raw) if isinstance(raw, list) else dict(raw) if isinstance(raw, dict) else raw
             if isinstance(data, list) and question:
                 data = _smart_filter(rel_path, data, question, course_names,
                                      mentioned_course=mentioned_course)
@@ -340,13 +357,13 @@ def _load_context(categories: set[str], question: str = "",
                 continue
             if "student" in rel_path:
                 if isinstance(data, list):
-                    for item in data:
-                        if isinstance(item, dict):
-                            item.pop("phone", None)
-                            item.pop("email", None)
+                    data = [
+                        {k: v for k, v in item.items() if k not in ("phone", "email")}
+                        if isinstance(item, dict) else item
+                        for item in data
+                    ]
                 elif isinstance(data, dict):
-                    data.pop("phone", None)
-                    data.pop("email", None)
+                    data = {k: v for k, v in data.items() if k not in ("phone", "email")}
             section = f"=== {label} ===\n{json.dumps(data, ensure_ascii=False, indent=1)}"
 
         if total_chars + len(section) > max_chars and sections:
