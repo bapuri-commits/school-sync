@@ -9,6 +9,18 @@ async def extract_courses(page) -> list[dict]:
     """대시보드에서 수강 과목 목록을 추출한다."""
     await safe_goto(page, f"{BASE_URL}/")
 
+    # 코스 링크가 JS 렌더링으로 늦게 나타날 수 있으므로 최대 10초 대기
+    try:
+        await page.wait_for_selector(
+            'a[href*="/course/view.php"]',
+            timeout=10000,
+        )
+    except Exception:
+        # 타임아웃 시 빈 목록 반환 (호출부에서 에러 처리)
+        current_url = page.url
+        print(f"[COURSES] 코스 링크 대기 시간 초과 (현재 URL: {current_url})")
+        return []
+
     courses = await page.evaluate("""
         () => {
             const courses = [];
